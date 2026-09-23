@@ -10,14 +10,17 @@ On this GitHub page choose **Code → Download ZIP**, or grab the zip attached t
 
 **Double-click `Neeky.html`.** That one file is the studio (code, fonts, and 3D library included). It works offline.
 
-If a browser blocks the double-clicked file, use the local server instead:
+**Double-click `Neeky.html`.** That one file is the studio (code, fonts, and 3D library included). It works offline. You do not need the script for that.
 
-- Mac or Linux: `./start.sh`
-- Windows: double-click `start.bat`
+If a browser blocks the double-clicked file, start the local server from this folder:
 
-Then open http://127.0.0.1:8080/ . Needs Python 3, which is already on most Macs and Linux machines. Windows: install Python from python.org if `start.bat` asks for it.
+```
+python3 start.sh
+```
 
-Do not open `index.html` as a file. The editable source uses JavaScript modules, and browsers only load those from a local server.
+Then open http://127.0.0.1:8080/ . On Windows, double-click `start.bat` instead. Needs Python 3.
+
+Do not open `index.html` by double-click. The editable source uses JavaScript modules, and browsers only load those from the local server above.
 
 ## Units
 

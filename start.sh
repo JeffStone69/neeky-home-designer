@@ -1,16 +1,23 @@
-#!/usr/bin/env bash
-cd "$(dirname "$0")"
-PORT="${PORT:-8080}"
-echo "Neeky Home Designer → http://127.0.0.1:${PORT}/"
-echo "Leave this window open. Stop with Ctrl+C."
-if command -v python3 >/dev/null 2>&1; then
-  exec python3 -m http.server "$PORT"
-fi
-if command -v python >/dev/null 2>&1; then
-  exec python -m http.server "$PORT"
-fi
-if command -v npx >/dev/null 2>&1; then
-  exec npx --yes serve -l "$PORT" .
-fi
-echo "Install Python 3, then run this script again." >&2
-exit 1
+#!/bin/sh
+"exec" "python3" "$0" "$@"
+# Run with:  python3 start.sh
+# Also works as ./start.sh — the shell line above hands the file to Python.
+import os
+import socketserver
+from functools import partial
+from http.server import SimpleHTTPRequestHandler
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+os.chdir(ROOT)
+PORT = int(os.environ.get("PORT", "8080"))
+
+print(f"Neeky Home Designer → http://127.0.0.1:{PORT}/")
+print("Leave this window open. Stop with Ctrl+C.")
+handler = partial(SimpleHTTPRequestHandler, directory=str(ROOT))
+socketserver.TCPServer.allow_reuse_address = True
+try:
+    with socketserver.TCPServer(("127.0.0.1", PORT), handler) as httpd:
+        httpd.serve_forever()
+except KeyboardInterrupt:
+    print("\nStopped.")
