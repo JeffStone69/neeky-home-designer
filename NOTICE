@@ -1,0 +1,11 @@
+Neeky Home Designer includes third-party software.
+
+Three.js r170 (js/vendor/three.module.js, OrbitControls.js, GLTFExporter.js)
+Copyright 2010-2024 Three.js Authors
+SPDX-License-Identifier: MIT
+https://github.com/mrdoob/three.js
+
+IBM Plex Sans and IBM Plex Mono (fonts/)
+Copyright IBM Corp.
+Licensed under the SIL Open Font License 1.1. See fonts/OFL.txt.
+https://github.com/IBM/plex
