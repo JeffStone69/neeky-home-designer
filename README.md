@@ -2,13 +2,13 @@
 
 A calm metric floor-plan studio. Draw walls in metres, snap to a grid, then orbit the same plan as a 3D house. This folder is the whole app: no account, no build step, and no network after you have unzipped it.
 
+Latest release: [v1.0.1](https://github.com/JeffStone69/neeky-home-designer/releases/tag/v1.0.1).
+
 ## Download
 
-On this GitHub page choose **Code → Download ZIP**, or grab the zip attached to the latest Release. Unzip it anywhere.
+On this GitHub page choose **Code → Download ZIP**, or take the zip on the latest Release. Unzip it anywhere.
 
 ## Open it
-
-**Double-click `Neeky.html`.** That one file is the studio (code, fonts, and 3D library included). It works offline.
 
 **Double-click `Neeky.html`.** That one file is the studio (code, fonts, and 3D library included). It works offline. You do not need the script for that.
 
@@ -19,6 +19,12 @@ python3 start.sh
 ```
 
 Then open http://127.0.0.1:8080/ . On Windows, double-click `start.bat` instead. Needs Python 3.
+
+If port 8080 is already taken (the FLUX desk uses it too), pick another:
+
+```
+PORT=8090 python3 start.sh
+```
 
 Do not open `index.html` by double-click. The editable source uses JavaScript modules, and browsers only load those from the local server above.
 
@@ -54,3 +60,4 @@ Select an object to edit its size in the floating inspector. Right-click (or lon
 | `index.html`, `js/`, `styles.css` | Same studio as separate files, for editing. Serve with `start.sh` / `start.bat`. |
 | `js/vendor/three.module.js` | Three.js r170 (MIT), bundled so the 3D view works offline. |
 | `fonts/` | IBM Plex (OFL). See `fonts/OFL.txt`. |
+| `LICENSE`, `NOTICE` | MIT for the app. Fonts stay under their own OFL. |
