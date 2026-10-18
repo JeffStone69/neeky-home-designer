@@ -14,7 +14,7 @@ Version 1.3. The app is an offline metric floor-plan studio. There is no account
 | `js/panels.js` | Toolbar shell, inspector and menu markup. |
 | `js/io.js` | Open / save / sheet download. |
 | `js/schema.js` | JSON schema, migrations, validation. |
-| `js/geom.js` | Walls, rooms, snap, areas, `normalizePlan`. |
+| `js/geom.js` | Walls, rooms, snap, areas, `normalizePlan`. `nearestWall` hashes segments into a grid. |
 | `js/elements.js` | Decks, steps, stump grids. |
 | `js/plan2d.js`, `js/view3d.js` | Canvas views. 3D loads after first paint. |
 | `js/furniture.js`, `js/generate.js` | Pieces and the local plan generator. |
@@ -45,7 +45,9 @@ v1.3 layers, all optional:
 
 **North is +Z**, which is up on the plan. Wall thickness is 0.20 m and wall height is 2.70 m (`js/constants.js`). Overall dimensions in `outside` mode are the centreline bounding box expanded by half the thickness on every side. Gross floor area is the area inside the outside face of the external walls. Room labels are the area inside the inside faces.
 
-`localStorage` key `neeky-home-designer-v2` is the storage slot, not the schema version. Keep the key so existing browsers still open.
+`localStorage` key `neeky-home-designer-v2` is the storage slot, not the schema version. Keep the key so existing browsers still open. A value that fails validation is copied to `neeky-home-designer-v2-unreadable` and left in place until the user edits or opens a file. Do not write the Family preset over it on startup.
+
+Sheet export keeps the scale the user picked (1:50 or 1:100). The page is A3 when the drawing fits, and larger at that same scale when it does not. Do not shrink the drawing and relabel the scale.
 
 Opening a file parses JSON, migrates, validates finite coordinates, then `loadPlan` runs `normalizePlan` (`planarize` + `mergeCollinear` + opening rebind). Do not skip that path for imports.
 

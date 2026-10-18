@@ -1,4 +1,4 @@
-import { SNAP, SNAP_FINE, STORAGE_KEY } from "./constants.js";
+import { SNAP, SNAP_FINE, STORAGE_BACKUP_KEY, STORAGE_KEY } from "./constants.js";
 import { createCommands } from "./commands.js";
 import { normalizeDeck } from "./elements.js";
 import { FURN, cloneFurn, ensurePlants, furnLabel, moveFurniture, placeDefaultFurniture, placeFurniture } from "./furniture.js";
@@ -34,9 +34,10 @@ import {
   paletteHtml,
   roomAreaText,
   shellHtml,
+  statusBarHtml,
 } from "./panels.js";
 import { serializePlan } from "./schema.js";
-import { applySnapshot, checkpoint, createPersist, createState, snapshot } from "./store.js";
+import { applySnapshot, checkpoint, createPersist, createState, keepUnreadableAutosave, readAutosave, snapshot } from "./store.js";
 
 const DIM_ORDER = ["centreline", "inside", "outside"];
 const DIM_LABEL = { centreline: "Centreline", inside: "Inside", outside: "Outside" };
@@ -73,6 +74,7 @@ export function mount(root) {
     state.pins = norm.pins;
     state.rooms = norm.rooms;
     state.labels = norm.labels;
+    persist.release();
     persist.persist();
     render();
   }
@@ -87,14 +89,21 @@ export function mount(root) {
     }, 2200);
   }
 
-  function showError(msg) {
+  function showError(msg, opts = {}) {
     const el = $("#toast");
     el.hidden = false;
     el.textContent = msg;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => {
-      el.hidden = true;
-    }, 6500);
+    if (!opts.sticky) {
+      toastTimer = setTimeout(() => {
+        el.hidden = true;
+      }, 6500);
+    }
+  }
+
+  function saveNow() {
+    persist.release();
+    persist.persistNow();
   }
 
   const commands = createCommands(state, {
@@ -120,7 +129,7 @@ export function mount(root) {
     return pickHit(state, world, screen, viewBox());
   }
 
-  function loadPlan(plan, pushHistory) {
+  function loadPlan(plan, pushHistory, opts = {}) {
     if (pushHistory) checkpoint(state);
     const norm = normalizePlan({
       walls: plan.walls || [],
@@ -154,7 +163,8 @@ export function mount(root) {
     state.note = "";
     ensurePlants(state);
     state.tool = "select";
-    persist.persistNow();
+    if (opts.hold) persist.hold();
+    else saveNow();
     render();
     requestAnimationFrame(() => {
       plan2d.fit();
@@ -485,6 +495,7 @@ export function mount(root) {
     else if (state.tool === "steps") extra = " · click to place steps";
     else if (state.tool === "stumps") extra = " · click to place a stump";
     if (state.note) extra += ` · ${state.note}`;
+    const summary = `${state.rooms.length} rooms · net ${fmtArea(net)} · GFA ${fmtArea(gfa)}${extra}`;
     const toolName = {
       select: "Select",
       wall: "Wall",
@@ -497,13 +508,13 @@ export function mount(root) {
       steps: "Steps",
       stumps: "Stumps",
     }[state.tool];
-    status.innerHTML = `<button type="button" class="snap-btn" data-act="snap">Snap ${state.snap.toFixed(2)} m</button>
-      <button type="button" class="snap-btn" data-act="dim">Dims ${DIM_LABEL[state.dimMode] || "Centreline"}</button>
-      <span>${toolName}</span>
-      ${action}
-      <span class="grow"></span>
-      <span class="mono">${state.rooms.length} rooms · net ${fmtArea(net)} · GFA ${fmtArea(gfa)}${extra}</span>
-      <span class="hint">Right-click for tools · ⌫ delete · R rotate · ⌘Z undo</span>`;
+    status.innerHTML = statusBarHtml({
+      snap: state.snap.toFixed(2),
+      dim: DIM_LABEL[state.dimMode] || "Centreline",
+      tool: toolName,
+      action,
+      summary,
+    });
     status.querySelector("[data-act=snap]")?.addEventListener("click", () => {
       state.snap = state.snap === SNAP ? SNAP_FINE : SNAP;
       updateStatus();
@@ -511,7 +522,7 @@ export function mount(root) {
     status.querySelector("[data-act=dim]")?.addEventListener("click", () => {
       const i = DIM_ORDER.indexOf(state.dimMode);
       state.dimMode = DIM_ORDER[(i + 1) % DIM_ORDER.length];
-      persist.persistNow();
+      saveNow();
       render();
     });
     status.querySelector("[data-act=hide-plant]")?.addEventListener("click", () => {
@@ -579,7 +590,7 @@ export function mount(root) {
     state.future.push(snapshot(state));
     applySnapshot(state, prev);
     refreshRooms();
-    persist.persistNow();
+    saveNow();
     render();
   }
   function redo() {
@@ -588,7 +599,7 @@ export function mount(root) {
     state.past.push(snapshot(state));
     applySnapshot(state, nxt);
     refreshRooms();
-    persist.persistNow();
+    saveNow();
     render();
   }
 
@@ -1210,6 +1221,11 @@ export function mount(root) {
     if (e.target.closest("#redo-btn")) redo();
   });
 
+  $("#toast").addEventListener("click", () => {
+    $("#toast").hidden = true;
+    clearTimeout(toastTimer);
+  });
+
   $("#file-in").addEventListener("change", async (e) => {
     const file = e.target.files?.[0];
     e.target.value = "";
@@ -1349,14 +1365,27 @@ export function mount(root) {
   });
 
   let saved = null;
+  let rawSaved = null;
+  let startupError = null;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) saved = readPlanText(raw);
+    rawSaved = localStorage.getItem(STORAGE_KEY);
   } catch {
-    saved = null;
+    rawSaved = null;
   }
+  if (rawSaved) {
+    const read = readAutosave(rawSaved);
+    if (read.ok) saved = read.plan;
+    else startupError = read.error || "Could not open the saved plan.";
+  }
+  if (startupError) keepUnreadableAutosave(rawSaved);
   if (saved?.walls?.length) loadPlan(saved, false);
-  else loadPlan(familyPlan(), false);
+  else loadPlan(familyPlan(), false, { hold: !!startupError });
+  if (startupError) {
+    showError(
+      `Could not open the plan saved in this browser (${startupError}). That copy is kept under ${STORAGE_BACKUP_KEY} and will not be replaced until you edit or open another file.`,
+      { sticky: true },
+    );
+  }
 
   return () => {
     alive = false;

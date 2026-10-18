@@ -4,6 +4,7 @@ export const APP_VERSION_LABEL = "1.3";
 export const SCHEMA_VERSION = 2;
 export const VERSION = SCHEMA_VERSION;
 export const STORAGE_KEY = "neeky-home-designer-v2";
+export const STORAGE_BACKUP_KEY = "neeky-home-designer-v2-unreadable";
 export const DIM_MODES = ["centreline", "inside", "outside"];
 
 export const WALL_THICK = 0.2;

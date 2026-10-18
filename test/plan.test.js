@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { STUMP_HEIGHT, STUMP_SIZE } from "../js/constants.js";
+import { STORAGE_BACKUP_KEY, STORAGE_KEY, STUMP_HEIGHT, STUMP_SIZE } from "../js/constants.js";
 import { stumpGrid } from "../js/elements.js";
 import { layoutSheet, toDxf, toPdf, toSvg } from "../js/export-sheet.js";
 import { familyPlan } from "../js/generate.js";
@@ -11,12 +11,16 @@ import {
   grossFloorArea,
   indexPoints,
   internalArea,
+  nearestWall,
   normalizePlan,
   offsetPolygon,
   planarize,
+  projectOnSeg,
   wallLen,
 } from "../js/geom.js";
+import { statusBarHtml } from "../js/panels.js";
 import { importPlanData, serializePlan } from "../js/schema.js";
+import { createPersist, createState, keepUnreadableAutosave, readAutosave } from "../js/store.js";
 
 const original = JSON.parse(readFileSync(new URL("./fixtures/belli-v1.json", import.meta.url), "utf8"));
 
@@ -155,4 +159,112 @@ test("sheet export carries scale, north, title block, and DXF walls", () => {
   assert.match(dxf, /WALLS/);
   assert.match(dxf, /\nLINE\n/);
   assert.match(dxf, /\$INSUNITS/);
+  assert.equal(model.w, 420);
+  assert.equal(model.h, 297);
+});
+
+const xssPayload = `<img src=x onerror="window.__xss=1">`;
+
+test("status strip escapes room and furniture names", () => {
+  const html = statusBarHtml({
+    snap: "0.25",
+    dim: "Outside",
+    tool: "Select",
+    action: "",
+    summary: `1 rooms · net 10.24 m² · GFA 12.96 m² · ${xssPayload} 10.24 m² · ${xssPayload}`,
+  });
+  assert.equal(html.includes("<img"), false);
+  assert.match(html, /&lt;img src=x onerror=&quot;window\.__xss=1&quot;&gt;/);
+});
+
+test("unreadable autosave is kept and not overwritten until released", async () => {
+  const mem = new Map();
+  const storage = {
+    getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+    setItem: (k, v) => mem.set(k, String(v)),
+  };
+  const raw = JSON.stringify({
+    app: "neeky-home-designer",
+    version: 9,
+    title: "keep me",
+    walls: [
+      { a: [0, 0], b: [4, 0] },
+      { a: [4, 0], b: [4, 3] },
+      { a: [4, 3], b: [0, 3] },
+      { a: [0, 3], b: [0, 0] },
+    ],
+  });
+  storage.setItem(STORAGE_KEY, raw);
+  const read = readAutosave(raw);
+  assert.equal(read.ok, false);
+  assert.match(read.error, /schema 9/);
+  keepUnreadableAutosave(raw, storage);
+  const state = createState();
+  const persist = createPersist(() => state, storage);
+  persist.hold();
+  persist.persist();
+  persist.persistNow();
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  assert.equal(storage.getItem(STORAGE_KEY), raw);
+  assert.equal(storage.getItem(STORAGE_BACKUP_KEY), raw);
+  persist.release();
+  state.title = "edited";
+  persist.persistNow();
+  const written = JSON.parse(storage.getItem(STORAGE_KEY));
+  assert.equal(written.version, 2);
+  assert.equal(written.title, "edited");
+  assert.equal(storage.getItem(STORAGE_BACKUP_KEY), raw);
+  const migrated = readAutosave(JSON.stringify({ app: "neeky-home-designer", walls: raw && JSON.parse(raw).walls }));
+  assert.equal(migrated.ok, true);
+  assert.equal(migrated.plan.walls.length, 4);
+});
+
+test("nearestWall spatial index matches a full scan", () => {
+  const walls = [];
+  let n = 0;
+  for (let x = 0; x <= 12; x += 3) walls.push({ id: `v${n++}`, a: [x, 0], b: [x, 9] });
+  for (let z = 0; z <= 9; z += 3) walls.push({ id: `h${n++}`, a: [0, z], b: [12, z] });
+  walls.push({ id: "long", a: [0.2, 0.2], b: [11.5, 8.4] });
+  walls.push({ id: "tie-a", a: [1, 1], b: [1, 2] });
+  walls.push({ id: "tie-b", a: [1, 1], b: [2, 1] });
+  function linear(p, maxDist) {
+    let best = null;
+    for (const w of walls) {
+      const pr = projectOnSeg(p, w.a, w.b);
+      if (pr.dist <= maxDist && (!best || pr.dist < best.dist)) best = { id: w.id, dist: pr.dist, t: pr.t };
+    }
+    return best;
+  }
+  assert.equal(nearestWall([0, 0], [], 1), null);
+  assert.equal(nearestWall([0, 0], walls, Number.NaN), null);
+  for (const maxDist of [0, 0.05, 0.25, 0.45, 4, 99]) {
+    for (let x = -1; x <= 13; x += 0.5) {
+      for (let z = -1; z <= 10; z += 0.5) {
+        const p = [x, z];
+        const got = nearestWall(p, walls, maxDist);
+        const exp = linear(p, maxDist);
+        if (!exp) assert.equal(got, null, `${maxDist} ${x},${z}`);
+        else {
+          assert.equal(got.wall.id, exp.id, `${maxDist} ${x},${z}`);
+          assert.ok(Math.abs(got.dist - exp.dist) < 1e-9);
+          assert.ok(Math.abs(got.t - exp.t) < 1e-9);
+        }
+      }
+    }
+  }
+});
+
+test("sheet export keeps 1:50 when the family plan does not fit on A3", () => {
+  const plan = normalizePlan(familyPlan());
+  plan.dimMode = "outside";
+  plan.title = "Family";
+  const model = layoutSheet(plan, { scale: 50, date: "2026-10-18" });
+  assert.equal(model.scale, 50);
+  assert.ok(model.w > 420 || model.h > 297);
+  const svg = toSvg(model);
+  assert.match(svg, /1:50/);
+  assert.equal(svg.includes("1:64"), false);
+  const at100 = layoutSheet(plan, { scale: 100, date: "2026-10-18" });
+  assert.equal(at100.scale, 100);
+  assert.match(toSvg(at100), /1:100/);
 });

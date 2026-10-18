@@ -916,13 +916,14 @@ var __export = (target, all) => {
 };
 
 // js/constants.js
-var APP, APP_VERSION_LABEL, SCHEMA_VERSION, STORAGE_KEY, DIM_MODES, WALL_THICK, WALL_HEIGHT, DOOR_W, DOOR_H, WIN_W, WIN_H, WIN_SILL, SNAP, SNAP_FINE, MINOR, MAJOR, MIN_ROOM_AREA, STUMP_SPACING, STUMP_SIZE, STUMP_HEIGHT, COLORS;
+var APP, APP_VERSION_LABEL, SCHEMA_VERSION, STORAGE_KEY, STORAGE_BACKUP_KEY, DIM_MODES, WALL_THICK, WALL_HEIGHT, DOOR_W, DOOR_H, WIN_W, WIN_H, WIN_SILL, SNAP, SNAP_FINE, MINOR, MAJOR, MIN_ROOM_AREA, STUMP_SPACING, STUMP_SIZE, STUMP_HEIGHT, COLORS;
 var init_constants = __esm({
   "js/constants.js"() {
     APP = "neeky-home-designer";
     APP_VERSION_LABEL = "1.3";
     SCHEMA_VERSION = 2;
     STORAGE_KEY = "neeky-home-designer-v2";
+    STORAGE_BACKUP_KEY = "neeky-home-designer-v2-unreadable";
     DIM_MODES = ["centreline", "inside", "outside"];
     WALL_THICK = 0.2;
     WALL_HEIGHT = 2.7;
@@ -1317,13 +1318,55 @@ function pointInPoly(p, pts) {
   }
   return inside;
 }
-function nearestWall(p, walls, maxDist) {
-  let best = null;
-  for (const w of walls) {
-    const pr = projectOnSeg(p, w.a, w.b);
-    if (pr.dist <= maxDist && (!best || pr.dist < best.dist)) {
-      best = { wall: w, ...pr };
+function indexWalls(walls, cell) {
+  const buckets = /* @__PURE__ */ new Map();
+  for (let i = 0; i < walls.length; i++) {
+    const w = walls[i];
+    const minX = Math.min(w.a[0], w.b[0]);
+    const maxX = Math.max(w.a[0], w.b[0]);
+    const minZ = Math.min(w.a[1], w.b[1]);
+    const maxZ = Math.max(w.a[1], w.b[1]);
+    const i0 = Math.floor(minX / cell);
+    const i1 = Math.floor(maxX / cell);
+    const j0 = Math.floor(minZ / cell);
+    const j1 = Math.floor(maxZ / cell);
+    for (let ix = i0; ix <= i1; ix++) {
+      for (let iz = j0; iz <= j1; iz++) {
+        const k = `${ix},${iz}`;
+        let list = buckets.get(k);
+        if (!list) buckets.set(k, list = []);
+        list.push({ i, w });
+      }
     }
+  }
+  return buckets;
+}
+function nearestWall(p, walls, maxDist) {
+  if (!Array.isArray(walls) || !walls.length || !p) return null;
+  if (!Number.isFinite(maxDist) || maxDist < 0) return null;
+  if (!Number.isFinite(p[0]) || !Number.isFinite(p[1])) return null;
+  const cell = Math.max(maxDist, 0.25);
+  const buckets = indexWalls(walls, cell);
+  const ix = Math.floor(p[0] / cell);
+  const iz = Math.floor(p[1] / cell);
+  const seen = /* @__PURE__ */ new Set();
+  const candidates = [];
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dz = -1; dz <= 1; dz++) {
+      const list = buckets.get(`${ix + dx},${iz + dz}`);
+      if (!list) continue;
+      for (const item of list) {
+        if (seen.has(item.i)) continue;
+        seen.add(item.i);
+        candidates.push(item);
+      }
+    }
+  }
+  candidates.sort((a, b) => a.i - b.i);
+  let best = null;
+  for (const item of candidates) {
+    const pr = projectOnSeg(p, item.w.a, item.w.b);
+    if (pr.dist <= maxDist && (!best || pr.dist < best.dist)) best = { wall: item.w, ...pr };
   }
   return best;
 }
@@ -37972,7 +38015,7 @@ init_geom();
 init_constants();
 init_elements();
 init_geom();
-var PAPER = { w: 420, h: 297 };
+var A3 = { w: 420, h: 297 };
 function round(n) {
   return Math.round(n * 1e3) / 1e3;
 }
@@ -38085,14 +38128,15 @@ function layoutSheet(state, opts = {}) {
   const margin = 14;
   const titleW = 86;
   const titleH = 46;
-  const availW = PAPER.w - margin * 2 - titleW - 8;
-  const availH = PAPER.h - margin * 2;
-  const exact = 1e3 / scale;
-  const fit = Math.min(availW / worldW, availH / worldH);
-  const mmPerM = Math.min(exact, fit);
-  const usedScale = Math.max(1, Math.round(1e3 / mmPerM));
+  const gap = 8;
+  const mmPerM = 1e3 / scale;
   const drawW = worldW * mmPerM;
   const drawH = worldH * mmPerM;
+  const fitsA3 = drawW <= A3.w - margin * 2 - titleW - gap && drawH <= A3.h - margin * 2;
+  const paperW = fitsA3 ? A3.w : Math.max(A3.w, Math.ceil(margin * 2 + drawW + titleW + gap));
+  const paperH = fitsA3 ? A3.h : Math.max(A3.h, Math.ceil(margin * 2 + drawH));
+  const availW = paperW - margin * 2 - titleW - gap;
+  const availH = paperH - margin * 2;
   const originX = margin + (availW - drawW) / 2;
   const originY = margin + (availH - drawH) / 2;
   const minX = b.minX - pad;
@@ -38103,8 +38147,8 @@ function layoutSheet(state, opts = {}) {
   const stroke = (pts, color, width, dash) => items.push({ op: "stroke", pts, color, width, close: false, dash });
   const strokeClosed = (pts, color, width) => items.push({ op: "stroke", pts: [...pts, pts[0]], color, width });
   const label = (x, y, text, size, anchor = "start", weight = 500) => items.push({ op: "text", x, y, text, size, anchor, color: "#1c1917", weight });
-  items.push({ op: "fill", pts: [[0, 0], [PAPER.w, 0], [PAPER.w, PAPER.h], [0, PAPER.h]], color: "#f7f4ec" });
-  stroke([[margin / 2, margin / 2], [PAPER.w - margin / 2, margin / 2], [PAPER.w - margin / 2, PAPER.h - margin / 2], [margin / 2, PAPER.h - margin / 2], [margin / 2, margin / 2]], "#d4cdc0", 0.3);
+  items.push({ op: "fill", pts: [[0, 0], [paperW, 0], [paperW, paperH], [0, paperH]], color: "#f7f4ec" });
+  stroke([[margin / 2, margin / 2], [paperW - margin / 2, margin / 2], [paperW - margin / 2, paperH - margin / 2], [margin / 2, paperH - margin / 2], [margin / 2, margin / 2]], "#d4cdc0", 0.3);
   for (const e of entities) {
     if (e.kind === "poly" && (e.layer === "DECK" || e.layer === "VERANDA")) {
       const pts = e.pts.map(map);
@@ -38150,7 +38194,7 @@ function layoutSheet(state, opts = {}) {
     const size = Math.max(2.2, e.h * mmPerM);
     label(p[0], p[1], e.text, e.layer === "ROOMS" && e.h > 0.2 ? size : size, "middle", e.layer === "ROOMS" && e.h > 0.2 ? 600 : 400);
   }
-  const nx = PAPER.w - margin - titleW / 2;
+  const nx = paperW - margin - titleW / 2;
   const ny = margin + 8;
   items.push({
     op: "fill",
@@ -38163,8 +38207,8 @@ function layoutSheet(state, opts = {}) {
     color: "#1c1917"
   });
   label(nx, ny - 1, "N", 4, "middle", 600);
-  const tbx = PAPER.w - margin - titleW;
-  const tby = PAPER.h - margin - titleH;
+  const tbx = paperW - margin - titleW;
+  const tby = paperH - margin - titleH;
   stroke(
     [
       [tbx, tby],
@@ -38182,14 +38226,14 @@ function layoutSheet(state, opts = {}) {
   const rows = [
     [`Neeky Home Designer ${APP_VERSION_LABEL}`, 600],
     [state.title || "Untitled plan", 500],
-    [`Scale 1:${usedScale}    metres`, 400],
+    [`Scale 1:${scale}    metres`, 400],
     [`Dimensions: ${modeLabel}`, 400],
     [`GFA ${fmtArea(gfa)}`, 500],
     [`Walls ${WALL_THICK.toFixed(2)} m × ${WALL_HEIGHT.toFixed(2)} m`, 400],
     [date ? `Date ${date}` : "Offline sheet", 400]
   ];
   rows.forEach((row, i) => label(tbx + 3, tby + 6 + i * 5.6, row[0], 3.1, "start", row[1]));
-  return { w: PAPER.w, h: PAPER.h, scale: usedScale, items };
+  return { w: paperW, h: paperH, scale, items };
 }
 function escapeXml(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -39331,6 +39375,15 @@ function shellHtml() {
 function escapeHtml(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
+function statusBarHtml({ snap: snap2, dim, tool, action = "", summary }) {
+  return `<button type="button" class="snap-btn" data-act="snap">Snap ${escapeHtml(snap2)} m</button>
+      <button type="button" class="snap-btn" data-act="dim">Dims ${escapeHtml(dim)}</button>
+      <span>${escapeHtml(tool)}</span>
+      ${action}
+      <span class="grow"></span>
+      <span class="mono">${escapeHtml(summary)}</span>
+      <span class="hint">Right-click for tools · ⌫ delete · R rotate · ⌘Z undo</span>`;
+}
 function paletteHtml() {
   const item = (id, name, dim) => {
     const icon = id === "tank" ? ICONS.lizard : ICONS[id];
@@ -39441,7 +39494,6 @@ function roomAreaText(room) {
 
 // js/store.js
 init_constants();
-init_constants();
 init_furniture();
 function createState() {
   return {
@@ -39504,23 +39556,57 @@ function checkpoint(state) {
   if (state.past.length > 60) state.past.shift();
   state.future = [];
 }
-function createPersist(getState) {
+function readAutosave(raw) {
+  if (raw == null || raw === "") return { ok: true, plan: null, raw: raw ?? null };
+  try {
+    return { ok: true, plan: importPlanData(raw), raw };
+  } catch (err) {
+    return {
+      ok: false,
+      plan: null,
+      raw,
+      error: err instanceof Error ? err.message : "Could not open the saved plan."
+    };
+  }
+}
+function keepUnreadableAutosave(raw, storage) {
+  if (raw == null) return;
+  const box = storage || globalThis.localStorage;
+  try {
+    box.setItem(STORAGE_BACKUP_KEY, raw);
+  } catch {
+  }
+}
+function createPersist(getState, storage) {
+  const box = storage || globalThis.localStorage;
+  let armed = true;
   let timer = 0;
   function write() {
+    if (!armed) return;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(serializePlan(getState())));
+      box.setItem(STORAGE_KEY, JSON.stringify(serializePlan(getState())));
     } catch {
     }
   }
   return {
     persist() {
+      if (!armed) return;
       clearTimeout(timer);
       timer = setTimeout(write, 280);
     },
     persistNow() {
+      if (!armed) return;
       clearTimeout(timer);
       timer = 0;
       write();
+    },
+    hold() {
+      armed = false;
+      clearTimeout(timer);
+      timer = 0;
+    },
+    release() {
+      armed = true;
     },
     cancel() {
       clearTimeout(timer);
@@ -39562,6 +39648,7 @@ function mount(root) {
     state.pins = norm.pins;
     state.rooms = norm.rooms;
     state.labels = norm.labels;
+    persist.release();
     persist.persist();
     render();
   }
@@ -39574,14 +39661,20 @@ function mount(root) {
       updateStatus();
     }, 2200);
   }
-  function showError(msg) {
+  function showError(msg, opts = {}) {
     const el = $("#toast");
     el.hidden = false;
     el.textContent = msg;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => {
-      el.hidden = true;
-    }, 6500);
+    if (!opts.sticky) {
+      toastTimer = setTimeout(() => {
+        el.hidden = true;
+      }, 6500);
+    }
+  }
+  function saveNow() {
+    persist.release();
+    persist.persistNow();
   }
   const commands = createCommands(state, {
     checkpoint: () => checkpoint(state),
@@ -39602,7 +39695,7 @@ function mount(root) {
   function pick(world, screen) {
     return pickHit(state, world, screen, viewBox());
   }
-  function loadPlan(plan, pushHistory) {
+  function loadPlan(plan, pushHistory, opts = {}) {
     if (pushHistory) checkpoint(state);
     const norm = normalizePlan({
       walls: plan.walls || [],
@@ -39636,7 +39729,8 @@ function mount(root) {
     state.note = "";
     ensurePlants(state);
     state.tool = "select";
-    persist.persistNow();
+    if (opts.hold) persist.hold();
+    else saveNow();
     render();
     requestAnimationFrame(() => {
       plan2d.fit();
@@ -39959,6 +40053,7 @@ function mount(root) {
     else if (state.tool === "steps") extra = " · click to place steps";
     else if (state.tool === "stumps") extra = " · click to place a stump";
     if (state.note) extra += ` · ${state.note}`;
+    const summary = `${state.rooms.length} rooms · net ${fmtArea(net)} · GFA ${fmtArea(gfa)}${extra}`;
     const toolName = {
       select: "Select",
       wall: "Wall",
@@ -39971,13 +40066,13 @@ function mount(root) {
       steps: "Steps",
       stumps: "Stumps"
     }[state.tool];
-    status.innerHTML = `<button type="button" class="snap-btn" data-act="snap">Snap ${state.snap.toFixed(2)} m</button>
-      <button type="button" class="snap-btn" data-act="dim">Dims ${DIM_LABEL[state.dimMode] || "Centreline"}</button>
-      <span>${toolName}</span>
-      ${action}
-      <span class="grow"></span>
-      <span class="mono">${state.rooms.length} rooms · net ${fmtArea(net)} · GFA ${fmtArea(gfa)}${extra}</span>
-      <span class="hint">Right-click for tools · ⌫ delete · R rotate · ⌘Z undo</span>`;
+    status.innerHTML = statusBarHtml({
+      snap: state.snap.toFixed(2),
+      dim: DIM_LABEL[state.dimMode] || "Centreline",
+      tool: toolName,
+      action,
+      summary
+    });
     status.querySelector("[data-act=snap]")?.addEventListener("click", () => {
       state.snap = state.snap === SNAP ? SNAP_FINE : SNAP;
       updateStatus();
@@ -39985,7 +40080,7 @@ function mount(root) {
     status.querySelector("[data-act=dim]")?.addEventListener("click", () => {
       const i = DIM_ORDER.indexOf(state.dimMode);
       state.dimMode = DIM_ORDER[(i + 1) % DIM_ORDER.length];
-      persist.persistNow();
+      saveNow();
       render();
     });
     status.querySelector("[data-act=hide-plant]")?.addEventListener("click", () => {
@@ -40049,7 +40144,7 @@ function mount(root) {
     state.future.push(snapshot(state));
     applySnapshot(state, prev);
     refreshRooms();
-    persist.persistNow();
+    saveNow();
     render();
   }
   function redo() {
@@ -40058,7 +40153,7 @@ function mount(root) {
     state.past.push(snapshot(state));
     applySnapshot(state, nxt);
     refreshRooms();
-    persist.persistNow();
+    saveNow();
     render();
   }
   function hidePop() {
@@ -40656,6 +40751,10 @@ function mount(root) {
     if (e.target.closest("#undo-btn")) undo();
     if (e.target.closest("#redo-btn")) redo();
   });
+  $("#toast").addEventListener("click", () => {
+    $("#toast").hidden = true;
+    clearTimeout(toastTimer);
+  });
   $("#file-in").addEventListener("change", async (e) => {
     const file = e.target.files?.[0];
     e.target.value = "";
@@ -40790,14 +40889,27 @@ function mount(root) {
     if (menu && !menu.hidden && !menu.contains(e.target) && !e.target.closest("#insp-more")) hideMenu();
   });
   let saved = null;
+  let rawSaved = null;
+  let startupError = null;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) saved = readPlanText(raw);
+    rawSaved = localStorage.getItem(STORAGE_KEY);
   } catch {
-    saved = null;
+    rawSaved = null;
   }
+  if (rawSaved) {
+    const read = readAutosave(rawSaved);
+    if (read.ok) saved = read.plan;
+    else startupError = read.error || "Could not open the saved plan.";
+  }
+  if (startupError) keepUnreadableAutosave(rawSaved);
   if (saved?.walls?.length) loadPlan(saved, false);
-  else loadPlan(familyPlan(), false);
+  else loadPlan(familyPlan(), false, { hold: !!startupError });
+  if (startupError) {
+    showError(
+      `Could not open the plan saved in this browser (${startupError}). That copy is kept under ${STORAGE_BACKUP_KEY} and will not be replaced until you edit or open another file.`,
+      { sticky: true }
+    );
+  }
   return () => {
     alive = false;
     clearTimeout(flashTimer);

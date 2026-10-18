@@ -100,6 +100,16 @@ export function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+export function statusBarHtml({ snap, dim, tool, action = "", summary }) {
+  return `<button type="button" class="snap-btn" data-act="snap">Snap ${escapeHtml(snap)} m</button>
+      <button type="button" class="snap-btn" data-act="dim">Dims ${escapeHtml(dim)}</button>
+      <span>${escapeHtml(tool)}</span>
+      ${action}
+      <span class="grow"></span>
+      <span class="mono">${escapeHtml(summary)}</span>
+      <span class="hint">Right-click for tools · ⌫ delete · R rotate · ⌘Z undo</span>`;
+}
+
 export function paletteHtml() {
   const item = (id, name, dim) => {
     const icon = id === "tank" ? ICONS.lizard : ICONS[id];

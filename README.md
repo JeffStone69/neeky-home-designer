@@ -36,9 +36,9 @@ Do not open `index.html` by double-click. The editable source uses JavaScript mo
 
 ## Files you save
 
-Plans autosave in this browser (`localStorage`, key `neeky-home-designer-v2`). A different browser, or the double-clicked file versus the local server, keeps a separate plan.
+Plans autosave in this browser (`localStorage`, key `neeky-home-designer-v2`). A different browser, or the double-clicked file versus the local server, keeps a separate plan. If a saved plan cannot be read, the raw copy stays under `neeky-home-designer-v2-unreadable` and is not replaced until you edit or open another file.
 
-**Plan file → Save JSON** downloads `neeky-plan.json` (schema 2). **Open JSON** checks the file, migrates older plans, and repairs T-junctions before drawing. **Download .glb** saves the current 3D house. **Plan SVG** and **Plan PDF** are A3 sheets at 1:50 or 1:100 with dimensions, a north arrow, and a title block. **DXF** is the same drawing in metres for CAD.
+**Plan file → Save JSON** downloads `neeky-plan.json` (schema 2). **Open JSON** checks the file, migrates older plans, and repairs T-junctions before drawing. **Download .glb** saves the current 3D house. **Plan SVG** and **Plan PDF** are drawn at 1:50 or 1:100, on A3 when the plan fits and on a larger sheet at that same scale when it does not, with dimensions, a north arrow, and a title block. **DXF** is the same drawing in metres for CAD.
 
 The status strip switches dimensions between **outside** faces, **inside** faces, and wall **centrelines**, and always shows gross floor area (outside faces). North is up on the plan.
 

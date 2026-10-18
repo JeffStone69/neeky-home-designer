@@ -11,7 +11,7 @@ import {
   wallLen,
 } from "./geom.js";
 
-const PAPER = { w: 420, h: 297 };
+const A3 = { w: 420, h: 297 };
 
 function round(n) {
   return Math.round(n * 1000) / 1000;
@@ -128,14 +128,15 @@ export function layoutSheet(state, opts = {}) {
   const margin = 14;
   const titleW = 86;
   const titleH = 46;
-  const availW = PAPER.w - margin * 2 - titleW - 8;
-  const availH = PAPER.h - margin * 2;
-  const exact = 1000 / scale;
-  const fit = Math.min(availW / worldW, availH / worldH);
-  const mmPerM = Math.min(exact, fit);
-  const usedScale = Math.max(1, Math.round(1000 / mmPerM));
+  const gap = 8;
+  const mmPerM = 1000 / scale;
   const drawW = worldW * mmPerM;
   const drawH = worldH * mmPerM;
+  const fitsA3 = drawW <= A3.w - margin * 2 - titleW - gap && drawH <= A3.h - margin * 2;
+  const paperW = fitsA3 ? A3.w : Math.max(A3.w, Math.ceil(margin * 2 + drawW + titleW + gap));
+  const paperH = fitsA3 ? A3.h : Math.max(A3.h, Math.ceil(margin * 2 + drawH));
+  const availW = paperW - margin * 2 - titleW - gap;
+  const availH = paperH - margin * 2;
   const originX = margin + (availW - drawW) / 2;
   const originY = margin + (availH - drawH) / 2;
   const minX = b.minX - pad;
@@ -149,8 +150,8 @@ export function layoutSheet(state, opts = {}) {
   const label = (x, y, text, size, anchor = "start", weight = 500) =>
     items.push({ op: "text", x, y, text, size, anchor, color: "#1c1917", weight });
 
-  items.push({ op: "fill", pts: [[0, 0], [PAPER.w, 0], [PAPER.w, PAPER.h], [0, PAPER.h]], color: "#f7f4ec" });
-  stroke([[margin / 2, margin / 2], [PAPER.w - margin / 2, margin / 2], [PAPER.w - margin / 2, PAPER.h - margin / 2], [margin / 2, PAPER.h - margin / 2], [margin / 2, margin / 2]], "#d4cdc0", 0.3);
+  items.push({ op: "fill", pts: [[0, 0], [paperW, 0], [paperW, paperH], [0, paperH]], color: "#f7f4ec" });
+  stroke([[margin / 2, margin / 2], [paperW - margin / 2, margin / 2], [paperW - margin / 2, paperH - margin / 2], [margin / 2, paperH - margin / 2], [margin / 2, margin / 2]], "#d4cdc0", 0.3);
 
   for (const e of entities) {
     if (e.kind === "poly" && (e.layer === "DECK" || e.layer === "VERANDA")) {
@@ -198,7 +199,7 @@ export function layoutSheet(state, opts = {}) {
     label(p[0], p[1], e.text, e.layer === "ROOMS" && e.h > 0.2 ? size : size, "middle", e.layer === "ROOMS" && e.h > 0.2 ? 600 : 400);
   }
 
-  const nx = PAPER.w - margin - titleW / 2;
+  const nx = paperW - margin - titleW / 2;
   const ny = margin + 8;
   items.push({
     op: "fill",
@@ -212,8 +213,8 @@ export function layoutSheet(state, opts = {}) {
   });
   label(nx, ny - 1, "N", 4, "middle", 600);
 
-  const tbx = PAPER.w - margin - titleW;
-  const tby = PAPER.h - margin - titleH;
+  const tbx = paperW - margin - titleW;
+  const tby = paperH - margin - titleH;
   stroke(
     [
       [tbx, tby],
@@ -231,14 +232,14 @@ export function layoutSheet(state, opts = {}) {
   const rows = [
     [`Neeky Home Designer ${APP_VERSION_LABEL}`, 600],
     [state.title || "Untitled plan", 500],
-    [`Scale 1:${usedScale}    metres`, 400],
+    [`Scale 1:${scale}    metres`, 400],
     [`Dimensions: ${modeLabel}`, 400],
     [`GFA ${fmtArea(gfa)}`, 500],
     [`Walls ${WALL_THICK.toFixed(2)} m × ${WALL_HEIGHT.toFixed(2)} m`, 400],
     [date ? `Date ${date}` : "Offline sheet", 400],
   ];
   rows.forEach((row, i) => label(tbx + 3, tby + 6 + i * 5.6, row[0], 3.1, "start", row[1]));
-  return { w: PAPER.w, h: PAPER.h, scale: usedScale, items };
+  return { w: paperW, h: paperH, scale, items };
 }
 
 function escapeXml(s) {

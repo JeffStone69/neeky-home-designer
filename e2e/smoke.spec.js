@@ -72,3 +72,51 @@ test("phone toolbar and plan stay usable", async ({ page }) => {
   expect(canvas.height).toBeGreaterThan(400);
   expect(errors, errors.join("\n")).toEqual([]);
 });
+
+test("a room name from a file cannot run as HTML", async ({ page }) => {
+  const errors = watch(page);
+  await page.goto("/", { waitUntil: "networkidle" });
+  await page.locator("#plan-canvas").waitFor();
+  await page.setInputFiles("#file-in", "test/fixtures/xss-name.json");
+  await expect(page.locator("#status")).toContainText("1 rooms");
+  await page.click('[data-view="plan"]');
+  await page.waitForTimeout(120);
+  const box = await page.locator("#plan-canvas").boundingBox();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  expect(await page.evaluate(() => window.__xss || 0)).toBe(0);
+  const html = await page.locator("#status").innerHTML();
+  expect(await page.locator("#status img").count()).toBe(0);
+  expect(html).not.toContain("<img");
+  expect(html).toContain('&lt;img src=x onerror="window.__xss=1"&gt;');
+  expect(errors, errors.join("\n")).toEqual([]);
+});
+
+test("an unreadable autosave is kept and reported", async ({ page }) => {
+  const errors = watch(page);
+  const raw = JSON.stringify({
+    app: "neeky-home-designer",
+    version: 9,
+    title: "keep me",
+    walls: [
+      { a: [0, 0], b: [4, 0] },
+      { a: [4, 0], b: [4, 3] },
+      { a: [4, 3], b: [0, 3] },
+      { a: [0, 3], b: [0, 0] },
+    ],
+  });
+  await page.addInitScript((value) => {
+    localStorage.setItem("neeky-home-designer-v2", value);
+  }, raw);
+  await page.goto("/", { waitUntil: "networkidle" });
+  await page.locator("#plan-canvas").waitFor();
+  await expect(page.locator("#toast")).toBeVisible();
+  await expect(page.locator("#toast")).toContainText("schema 9");
+  await expect(page.locator("#toast")).toContainText("neeky-home-designer-v2-unreadable");
+  const stored = await page.evaluate(() => ({
+    main: localStorage.getItem("neeky-home-designer-v2"),
+    backup: localStorage.getItem("neeky-home-designer-v2-unreadable"),
+  }));
+  expect(stored.main).toBe(raw);
+  expect(stored.backup).toBe(raw);
+  expect(errors, errors.join("\n")).toEqual([]);
+});

@@ -397,13 +397,59 @@ export function pointInPoly(p, pts) {
   return inside;
 }
 
-export function nearestWall(p, walls, maxDist) {
-  let best = null;
-  for (const w of walls) {
-    const pr = projectOnSeg(p, w.a, w.b);
-    if (pr.dist <= maxDist && (!best || pr.dist < best.dist)) {
-      best = { wall: w, ...pr };
+function indexWalls(walls, cell) {
+  const buckets = new Map();
+  for (let i = 0; i < walls.length; i++) {
+    const w = walls[i];
+    const minX = Math.min(w.a[0], w.b[0]);
+    const maxX = Math.max(w.a[0], w.b[0]);
+    const minZ = Math.min(w.a[1], w.b[1]);
+    const maxZ = Math.max(w.a[1], w.b[1]);
+    const i0 = Math.floor(minX / cell);
+    const i1 = Math.floor(maxX / cell);
+    const j0 = Math.floor(minZ / cell);
+    const j1 = Math.floor(maxZ / cell);
+    for (let ix = i0; ix <= i1; ix++) {
+      for (let iz = j0; iz <= j1; iz++) {
+        const k = `${ix},${iz}`;
+        let list = buckets.get(k);
+        if (!list) buckets.set(k, (list = []));
+        list.push({ i, w });
+      }
     }
+  }
+  return buckets;
+}
+
+// Segment lookup. Walls are hashed into grid cells so a query measures only
+// segments near the point. Cell size is at least maxDist, so the 3×3 neighbourhood
+// contains every wall that can win. Equal distances keep the earlier wall.
+export function nearestWall(p, walls, maxDist) {
+  if (!Array.isArray(walls) || !walls.length || !p) return null;
+  if (!Number.isFinite(maxDist) || maxDist < 0) return null;
+  if (!Number.isFinite(p[0]) || !Number.isFinite(p[1])) return null;
+  const cell = Math.max(maxDist, 0.25);
+  const buckets = indexWalls(walls, cell);
+  const ix = Math.floor(p[0] / cell);
+  const iz = Math.floor(p[1] / cell);
+  const seen = new Set();
+  const candidates = [];
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dz = -1; dz <= 1; dz++) {
+      const list = buckets.get(`${ix + dx},${iz + dz}`);
+      if (!list) continue;
+      for (const item of list) {
+        if (seen.has(item.i)) continue;
+        seen.add(item.i);
+        candidates.push(item);
+      }
+    }
+  }
+  candidates.sort((a, b) => a.i - b.i);
+  let best = null;
+  for (const item of candidates) {
+    const pr = projectOnSeg(p, item.w.a, item.w.b);
+    if (pr.dist <= maxDist && (!best || pr.dist < best.dist)) best = { wall: item.w, ...pr };
   }
   return best;
 }
