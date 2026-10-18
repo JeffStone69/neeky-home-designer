@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Neeky Home Designer</title>
-    <meta name="description" content="Metric floor-plan studio. Draw in metres, snap to a grid, and extrude a 3D house. Offline single-file build." />
+    <title>Neeky Home Designer, ...a plant in every corner</title>
+    <meta name="description" content="...a plant in every corner. Metric floor-plan studio. Draw in metres, snap to a grid, and extrude a 3D house. Offline single-file build." />
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+CiAgPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNyIgZmlsbD0iI2YzZWZlNiIvPgogIDxwYXRoIGZpbGw9IiMxYzE5MTciIGQ9Ik01LjUgMTUuNCAxNiA2LjJsMTAuNSA5LjJWMjYuNUg1LjV6Ii8+CiAgPHJlY3QgeD0iMTMuNSIgeT0iMTguNSIgd2lkdGg9IjUiIGhlaWdodD0iOCIgZmlsbD0iIzJmNWQ1MCIvPgo8L3N2Zz4K" />
     <style>
 @font-face {
@@ -136,6 +136,11 @@
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--subtle);
+}
+
+.titles .tagline {
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 @media (min-width: 720px) {
@@ -38651,7 +38656,7 @@ function layoutSheet(state, opts = {}) {
   const worldH = Math.max(b.h + pad * 2, 1);
   const margin = 14;
   const titleW = 86;
-  const titleH = 46;
+  const titleH = 52;
   const gap = 8;
   const mmPerM = 1e3 / scale;
   const drawW = worldW * mmPerM;
@@ -38763,6 +38768,7 @@ function layoutSheet(state, opts = {}) {
   const modeLabel = mode === "outside" ? "outside faces" : mode === "inside" ? "inside faces" : "centrelines";
   const rows = [
     [`Neeky Home Designer ${APP_VERSION_LABEL}`, 600],
+    ["...a plant in every corner", 400],
     [state.title || "Untitled plan", 500],
     [`Scale 1:${scale}    metres`, 400],
     [`Dimensions: ${modeLabel}`, 400],
@@ -40020,6 +40026,7 @@ function shellHtml() {
         <div class="titles">
           <strong>Neeky</strong>
           <span>Home Designer ${APP_VERSION_LABEL}</span>
+          <span class="tagline">...a plant in every corner</span>
         </div>
       </div>
       <div class="cluster tools-cluster">

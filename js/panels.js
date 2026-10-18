@@ -42,6 +42,7 @@ export function shellHtml() {
         <div class="titles">
           <strong>Neeky</strong>
           <span>Home Designer ${APP_VERSION_LABEL}</span>
+          <span class="tagline">...a plant in every corner</span>
         </div>
       </div>
       <div class="cluster tools-cluster">

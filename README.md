@@ -1,5 +1,7 @@
 # Neeky Home Designer
 
+...a plant in every corner
+
 A calm metric floor-plan studio. Draw walls in metres, snap to a grid, then orbit the same plan as a 3D house. This folder is the whole app: no account, and no network after you have unzipped it.
 
 Version 1.3.

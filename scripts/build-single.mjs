@@ -42,8 +42,8 @@ export async function buildHtml() {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Neeky Home Designer</title>
-    <meta name="description" content="Metric floor-plan studio. Draw in metres, snap to a grid, and extrude a 3D house. Offline single-file build." />
+    <title>Neeky Home Designer, ...a plant in every corner</title>
+    <meta name="description" content="...a plant in every corner. Metric floor-plan studio. Draw in metres, snap to a grid, and extrude a 3D house. Offline single-file build." />
     <link rel="icon" type="image/svg+xml" href="${iconHref}" />
     <style>
 ${fonts}

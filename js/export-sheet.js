@@ -137,7 +137,7 @@ export function layoutSheet(state, opts = {}) {
   const worldH = Math.max(b.h + pad * 2, 1);
   const margin = 14;
   const titleW = 86;
-  const titleH = 46;
+  const titleH = 52;
   const gap = 8;
   const mmPerM = 1000 / scale;
   const drawW = worldW * mmPerM;
@@ -255,6 +255,7 @@ export function layoutSheet(state, opts = {}) {
   const modeLabel = mode === "outside" ? "outside faces" : mode === "inside" ? "inside faces" : "centrelines";
   const rows = [
     [`Neeky Home Designer ${APP_VERSION_LABEL}`, 600],
+    ["...a plant in every corner", 400],
     [state.title || "Untitled plan", 500],
     [`Scale 1:${scale}    metres`, 400],
     [`Dimensions: ${modeLabel}`, 400],
