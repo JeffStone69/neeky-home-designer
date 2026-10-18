@@ -1,8 +1,8 @@
 # Neeky Home Designer
 
-A calm metric floor-plan studio. Draw walls in metres, snap to a grid, then orbit the same plan as a 3D house. This folder is the whole app: no account, no build step, and no network after you have unzipped it.
+A calm metric floor-plan studio. Draw walls in metres, snap to a grid, then orbit the same plan as a 3D house. This folder is the whole app: no account, and no network after you have unzipped it.
 
-Latest release: [v1.0.1](https://github.com/JeffStone69/neeky-home-designer/releases/tag/v1.0.1).
+Version 1.3.
 
 ## Download
 
@@ -36,9 +36,11 @@ Do not open `index.html` by double-click. The editable source uses JavaScript mo
 
 ## Files you save
 
-Plans autosave in this browser (`localStorage`, key `neeky-home-designer-v2`). A different browser, or the double-clicked file versus the local server, keeps a separate plan.
+Plans autosave in this browser (`localStorage`, key `neeky-home-designer-v2`). A different browser, or the double-clicked file versus the local server, keeps a separate plan. If a saved plan cannot be read, the raw copy stays under `neeky-home-designer-v2-unreadable` and is not replaced until you edit or open another file.
 
-**Plan file → Save JSON** downloads `neeky-plan.json`. **Open JSON** restores it. **Download .gltf** saves the current 3D house as `neeky-house.glb`.
+**Plan file → Save JSON** downloads `neeky-plan.json` (schema 2). **Open JSON** checks the file, migrates older plans, and repairs T-junctions before drawing. **Download .glb** saves the current 3D house. **Plan SVG** and **Plan PDF** are drawn at 1:50 or 1:100, on A3 when the plan fits and on a larger sheet at that same scale when it does not, with dimensions, a north arrow, and a title block. **DXF** is the same drawing in metres for CAD.
+
+The status strip switches dimensions between **outside** faces, **inside** faces, and wall **centrelines**, and always shows gross floor area (outside faces). North is up on the plan.
 
 ## Generate
 
@@ -46,7 +48,9 @@ Plans autosave in this browser (`localStorage`, key `neeky-home-designer-v2`). A
 
 ## Furniture
 
-Every room starts with a plant. Hide one from the status strip, or move it. **Furnish** places a sofa, bed, table, extra plant, or a **Blue-tongue** tank.
+Every room starts with a plant. Hide one from the status strip, or move it. **Furnish** places a sofa, bed, table, kitchen bench, robe, WC, extra plant, or a **Blue-tongue** tank.
+
+**Deck** drags an outdoor platform (the object menu can turn it into a veranda). **Steps** and **Stumps** are site layers, not walls. **Plan file → Stump grid under house** drops posts on a 1.5 m grid along the wall centrelines. A sample is `plans/belli-park-6x9-plan.json` (6 m × 9 m at Belli Park, with a 2 m north deck).
 
 The tank is 1.80 × 0.60 m. It snaps to a wall, shows a lizard on the plan, and will not sit in a doorway. Delete furniture the same way as a wall: Delete tool or Backspace.
 
@@ -56,8 +60,21 @@ Select an object to edit its size in the floating inspector. Right-click (or lon
 
 | Path | What it is |
 | --- | --- |
-| `Neeky.html` | Double-click studio. One file. |
+| `Neeky.html` | Double-click studio. One file, rebuilt from the source. |
 | `index.html`, `js/`, `styles.css` | Same studio as separate files, for editing. Serve with `start.sh` / `start.bat`. |
 | `js/vendor/three.module.js` | Three.js r170 (MIT), bundled so the 3D view works offline. |
 | `fonts/` | IBM Plex (OFL). See `fonts/OFL.txt`. |
+| `plans/` | Example plans, including the Belli Park tiny home. |
 | `LICENSE`, `NOTICE` | MIT for the app. Fonts stay under their own OFL. |
+
+## Rebuild the single file
+
+Editing `js/` or `styles.css` does not change `Neeky.html` until you rebuild it. Needs Node 22.
+
+```
+npm install
+npm test
+npm run build
+```
+
+`npm run build:check` fails if `Neeky.html` has drifted. `npm run e2e` serves the folder and opens the Belli Park plan in a browser.

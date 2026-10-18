@@ -1,6 +1,11 @@
 export const APP = "neeky-home-designer";
-export const VERSION = 1;
+export const APP_VERSION = "1.3.0";
+export const APP_VERSION_LABEL = "1.3";
+export const SCHEMA_VERSION = 2;
+export const VERSION = SCHEMA_VERSION;
 export const STORAGE_KEY = "neeky-home-designer-v2";
+export const STORAGE_BACKUP_KEY = "neeky-home-designer-v2-unreadable";
+export const DIM_MODES = ["centreline", "inside", "outside"];
 
 export const WALL_THICK = 0.2;
 export const WALL_HEIGHT = 2.7;
@@ -17,6 +22,9 @@ export const MAJOR = 1;
 
 export const MIN_ROOM_AREA = 0.8;
 export const JOIN_TOL = 0.05;
+export const STUMP_SPACING = 1.5;
+export const STUMP_SIZE = 0.15;
+export const STUMP_HEIGHT = 0.45;
 
 export const COLORS = {
   paper: "#f3efe6",

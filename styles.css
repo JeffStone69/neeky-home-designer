@@ -52,6 +52,13 @@
   flex-shrink: 0;
 }
 
+.cluster {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -193,14 +200,15 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  height: 36px;
-  padding: 0 12px 0 12px;
-  padding-right: 7rem;
+  min-height: 36px;
+  height: auto;
+  padding: 6px 12px;
   background: var(--paper-2);
   border-top: 1px solid var(--border);
   color: var(--muted);
   font-size: 12px;
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 .status .grow {
@@ -526,9 +534,13 @@
   gap: 6px;
 }
 
+.palette .furn-grid {
+  overflow-x: auto;
+}
+
 .palette .furn-item {
-  flex: 1;
-  min-width: 0;
+  flex: 1 0 76px;
+  min-width: 76px;
   flex-direction: row;
   justify-content: center;
   padding: 6px 8px;
@@ -577,7 +589,10 @@
 
 .app[data-tool="wall"] .plan-pane canvas,
 .app[data-tool="door"] .plan-pane canvas,
-.app[data-tool="window"] .plan-pane canvas {
+.app[data-tool="window"] .plan-pane canvas,
+.app[data-tool="deck"] .plan-pane canvas,
+.app[data-tool="steps"] .plan-pane canvas,
+.app[data-tool="stumps"] .plan-pane canvas {
   cursor: crosshair;
 }
 
@@ -585,7 +600,49 @@
   cursor: copy;
 }
 
+.toast {
+  position: absolute;
+  z-index: 60;
+  left: 12px;
+  right: 12px;
+  bottom: 52px;
+  padding: 10px 12px;
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.toast[hidden] {
+  display: none !important;
+}
+
 @media (max-width: 720px) {
+  .toolbar {
+    flex-wrap: wrap;
+    height: auto;
+    overflow: visible;
+    padding: 6px 8px 8px;
+    row-gap: 6px;
+  }
+  .view-cluster {
+    flex: 1;
+    justify-content: flex-end;
+    min-width: 0;
+  }
+  .tools-cluster {
+    flex: 1 0 100%;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+  .tool {
+    min-width: 44px;
+    height: 44px;
+  }
+  .snap-btn {
+    min-height: 32px;
+  }
   .stage {
     grid-template-columns: 1fr;
     grid-template-rows: 1fr 1fr;

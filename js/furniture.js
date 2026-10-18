@@ -6,6 +6,9 @@ export const FURN = {
   sofa: { w: 2.2, d: 0.9, label: "Sofa" },
   bed: { w: 2.0, d: 1.6, label: "Bed" },
   table: { w: 1.4, d: 0.8, label: "Table" },
+  bench: { w: 2.4, d: 0.6, label: "Bench" },
+  robe: { w: 1.8, d: 0.6, label: "Robe" },
+  wc: { w: 0.4, d: 0.7, label: "WC" },
   tank: { w: 1.8, d: 0.6, label: "Blue-tongue" },
 };
 
@@ -121,16 +124,16 @@ export function hitsDoorway(f, walls, openings) {
   return false;
 }
 
-export function containsPoint(f, p) {
+export function containsPoint(f, p, pad = 0.06) {
   if (f.hidden) return false;
-  if (f.type === "plant") return dist(p, [f.x, f.z]) <= Math.max(f.w, f.d) / 2 + 0.08;
+  if (f.type === "plant") return dist(p, [f.x, f.z]) <= Math.max(f.w, f.d) / 2 + pad + 0.02;
   const c = Math.cos(-f.rot);
   const s = Math.sin(-f.rot);
   const dx = p[0] - f.x;
   const dz = p[1] - f.z;
   const lx = dx * c - dz * s;
   const lz = dx * s + dz * c;
-  return Math.abs(lx) <= f.w / 2 + 0.06 && Math.abs(lz) <= f.d / 2 + 0.06;
+  return Math.abs(lx) <= f.w / 2 + pad && Math.abs(lz) <= f.d / 2 + pad;
 }
 
 function insideRoom(p, rooms) {
@@ -379,7 +382,13 @@ export function drawFurniture2d(ctx, f, cam, toScreen, opts = {}) {
         ? "rgba(232, 224, 212, 0.95)"
         : f.type === "sofa"
           ? "rgba(92, 107, 98, 0.88)"
-          : "rgba(166, 138, 96, 0.9)";
+          : f.type === "bench"
+            ? "rgba(184, 154, 110, 0.95)"
+            : f.type === "robe"
+              ? "rgba(232, 224, 208, 0.95)"
+              : f.type === "wc"
+                ? "rgba(247, 244, 236, 0.98)"
+                : "rgba(166, 138, 96, 0.9)";
   ctx.fillStyle = fill;
   ctx.strokeStyle = invalid ? "#8f3d32" : selected ? COLORS.accent : COLORS.ink;
   ctx.lineWidth = selected ? 2 : 1.2;
@@ -404,6 +413,26 @@ export function drawFurniture2d(ctx, f, cam, toScreen, opts = {}) {
   } else if (f.type === "table") {
     ctx.strokeStyle = "rgba(28,25,23,0.35)";
     ctx.strokeRect(-sx / 2 + 6, -sy / 2 + 6, sx - 12, sy - 12);
+  } else if (f.type === "bench") {
+    ctx.strokeStyle = "rgba(28,25,23,0.35)";
+    ctx.strokeRect(-sx / 2 + 4, -sy / 2 + 4, sx - 8, sy * 0.35);
+    ctx.beginPath();
+    ctx.arc(-sx * 0.22, 0, Math.min(sx, sy) * 0.12, 0, Math.PI * 2);
+    ctx.stroke();
+  } else if (f.type === "robe") {
+    ctx.strokeStyle = "rgba(28,25,23,0.4)";
+    ctx.beginPath();
+    ctx.moveTo(0, -sy / 2);
+    ctx.lineTo(0, sy / 2);
+    ctx.moveTo(-sx / 2, 0);
+    ctx.lineTo(sx / 2, 0);
+    ctx.stroke();
+  } else if (f.type === "wc") {
+    ctx.strokeStyle = COLORS.ink;
+    ctx.beginPath();
+    ctx.ellipse(0, sy * 0.08, sx * 0.32, sy * 0.28, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeRect(-sx * 0.28, -sy / 2 + 2, sx * 0.56, sy * 0.22);
   } else if (f.type === "tank") {
     ctx.strokeStyle = COLORS.frame;
     ctx.lineWidth = 2;
@@ -471,6 +500,9 @@ export function addFurniture3d(THREE, parent, f, selected) {
   else if (f.type === "sofa") addSofa3d(THREE, group, selected);
   else if (f.type === "bed") addBed3d(THREE, group, selected);
   else if (f.type === "table") addTable3d(THREE, group, selected);
+  else if (f.type === "bench") addBench3d(THREE, group);
+  else if (f.type === "robe") addRobe3d(THREE, group);
+  else if (f.type === "wc") addWc3d(THREE, group);
   else if (f.type === "tank") addTank3d(THREE, group, f, selected);
   if (accent) {
     group.traverse((o) => {
@@ -558,6 +590,48 @@ function addBed3d(THREE, group, selected) {
     p.position.set(-0.62, 0.46, z);
     group.add(p);
   }
+}
+
+function addBench3d(THREE, group) {
+  const top = new THREE.Mesh(
+    new THREE.BoxGeometry(2.4, 0.04, 0.6),
+    new THREE.MeshLambertMaterial({ color: 0xc4a574 }),
+  );
+  top.position.y = 0.9;
+  top.castShadow = true;
+  group.add(top);
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(2.32, 0.72, 0.52),
+    new THREE.MeshLambertMaterial({ color: 0xe8e0d4 }),
+  );
+  body.position.set(0, 0.5, 0.02);
+  group.add(body);
+}
+
+function addRobe3d(THREE, group) {
+  const carcass = new THREE.Mesh(
+    new THREE.BoxGeometry(1.8, 2.1, 0.58),
+    new THREE.MeshLambertMaterial({ color: 0xe4ddd0 }),
+  );
+  carcass.position.y = 1.05;
+  carcass.castShadow = true;
+  group.add(carcass);
+  const seam = new THREE.Mesh(
+    new THREE.BoxGeometry(0.02, 2.0, 0.02),
+    new THREE.MeshLambertMaterial({ color: 0x2c2a28 }),
+  );
+  seam.position.set(0, 1.05, 0.29);
+  group.add(seam);
+}
+
+function addWc3d(THREE, group) {
+  const ceramic = new THREE.MeshLambertMaterial({ color: 0xf4f1ea });
+  const pan = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.14, 0.12, 16), ceramic);
+  pan.position.set(0, 0.4, 0.08);
+  group.add(pan);
+  const cistern = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.32, 0.16), ceramic);
+  cistern.position.set(0, 0.55, -0.24);
+  group.add(cistern);
 }
 
 function addTable3d(THREE, group) {

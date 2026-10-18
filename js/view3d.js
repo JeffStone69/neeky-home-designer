@@ -2,7 +2,8 @@ import * as THREE from "./vendor/three.module.js";
 import { OrbitControls } from "./vendor/OrbitControls.js";
 import { GLTFExporter } from "./vendor/GLTFExporter.js";
 import { COLORS, MAJOR, MINOR, WALL_HEIGHT, WALL_THICK } from "./constants.js";
-import { bounds, wallLen } from "./geom.js";
+import { deckCorners, elementPoints, normalizeDeck } from "./elements.js";
+import { sceneBounds, wallLen } from "./geom.js";
 import { addFurniture3d } from "./furniture.js";
 
 export function createView3D(canvas) {
@@ -72,8 +73,9 @@ export function createView3D(canvas) {
   const doorMat = new THREE.MeshLambertMaterial({ color: 0xcbb79a });
 
   function resize() {
-    const w = Math.max(1, canvas.clientWidth);
-    const h = Math.max(1, canvas.clientHeight);
+    const el = canvas.parentElement || canvas;
+    const w = Math.max(1, el.clientWidth);
+    const h = Math.max(1, el.clientHeight);
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
@@ -245,10 +247,91 @@ export function createView3D(canvas) {
     roomMeshes.push(mesh);
   }
 
+  const timber = new THREE.MeshLambertMaterial({ color: 0xc4a574 });
+  const stumpMat = new THREE.MeshLambertMaterial({ color: 0x6b5344 });
+  const bearerMat = new THREE.MeshLambertMaterial({ color: 0x5c4636 });
+  const stepMat = new THREE.MeshLambertMaterial({ color: 0xd9cbb6 });
+
+  function addDeck(deck, drop) {
+    const r = normalizeDeck(deck);
+    if (r.w < 0.05 || r.d < 0.05) return;
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(r.w, 0.08, r.d), timber);
+    slab.position.set(r.x + r.w / 2, 0.04, r.z + r.d / 2);
+    slab.receiveShadow = true;
+    slab.castShadow = true;
+    slab.userData.deckId = deck.id;
+    house.add(slab);
+    if (deck.kind === "veranda") {
+      const roof = new THREE.Mesh(
+        new THREE.BoxGeometry(r.w, 0.05, r.d),
+        new THREE.MeshLambertMaterial({ color: 0xefece4 }),
+      );
+      roof.position.set(r.x + r.w / 2, 2.35, r.z + r.d / 2);
+      house.add(roof);
+      for (const p of deckCorners(r)) {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.09, 2.35 + drop, 0.09), stumpMat);
+        post.position.set(p[0], 2.35 / 2 - drop / 2, p[1]);
+        house.add(post);
+      }
+    }
+  }
+
+  function addSteps(step) {
+    const g = new THREE.Group();
+    g.position.set(step.x, 0, step.z);
+    g.rotation.y = -(step.rot || 0);
+    g.userData.stepId = step.id;
+    const rise = step.rise || 0.15;
+    const going = step.going || 0.28;
+    const count = step.count || 3;
+    const width = step.width || 1.2;
+    for (let i = 0; i < count; i++) {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(Math.max(0.05, going - 0.01), Math.max(0.04, rise - 0.01), width), stepMat);
+      mesh.position.set(going * (i + 0.5), -rise * (i + 0.5), 0);
+      mesh.castShadow = true;
+      g.add(mesh);
+    }
+    house.add(g);
+  }
+
+  function addStumps(stumps) {
+    const rows = new Map();
+    for (const s of stumps) {
+      const drop = s.height || 0.45;
+      const post = new THREE.Mesh(new THREE.BoxGeometry(s.size || 0.15, drop, s.size || 0.15), stumpMat);
+      post.position.set(s.x, -drop / 2, s.z);
+      post.castShadow = true;
+      post.userData.stumpId = s.id;
+      house.add(post);
+      const k = s.z.toFixed(3);
+      if (!rows.has(k)) rows.set(k, []);
+      rows.get(k).push(s);
+    }
+    for (const row of rows.values()) {
+      if (row.length < 2) continue;
+      row.sort((a, b) => a.x - b.x);
+      const span = row[row.length - 1].x - row[0].x;
+      if (span < 0.2) continue;
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(span, 0.09, 0.07), bearerMat);
+      beam.position.set((row[0].x + row[row.length - 1].x) / 2, -0.05, row[0].z);
+      house.add(beam);
+    }
+  }
+
+  function planBox(plan) {
+    return sceneBounds(plan.walls, elementPoints(plan));
+  }
+
   function rebuild(plan) {
     clearHouse();
-    const b = bounds(plan.walls);
+    const stumps = plan.stumps || [];
+    const drop = stumps.length ? Math.max(...stumps.map((s) => s.height || 0.45)) : 0;
+    ground.position.y = -drop - 0.02;
+    const b = planBox(plan);
     addGrid(b);
+    if (stumps.length) addStumps(stumps);
+    for (const deck of plan.decks || []) addDeck(deck, drop);
+    for (const step of plan.steps || []) addSteps(step);
     const selWall = plan.selection?.kind === "wall" ? plan.selection.id : null;
     const selRoom = plan.selection?.kind === "room" ? plan.selection.id : selectedRoomId;
     for (const w of plan.walls) {
@@ -266,7 +349,7 @@ export function createView3D(canvas) {
   }
 
   function fit(plan) {
-    const b = bounds(plan.walls);
+    const b = planBox(plan);
     if (!b) {
       camera.position.set(12, 14, 16);
       controls.target.set(6, 0, 6);
@@ -281,7 +364,7 @@ export function createView3D(canvas) {
   }
 
   function topView(plan) {
-    const b = bounds(plan.walls);
+    const b = planBox(plan);
     const cx = b ? (b.minX + b.maxX) / 2 : 6;
     const cz = b ? (b.minZ + b.maxZ) / 2 : 6;
     const span = b ? Math.max(b.w, b.h, 8) : 12;
@@ -355,13 +438,14 @@ export function createView3D(canvas) {
   });
 
   const ro = new ResizeObserver(resize);
-  ro.observe(canvas);
+  ro.observe(canvas.parentElement || canvas);
   resize();
   tick();
 
   return {
     rebuild,
     fit,
+    resize,
     topView,
     setOnRoomClick(fn) {
       onRoomClick = fn;

@@ -1,0 +1,329 @@
+{
+  "app": "neeky-home-designer",
+  "unit": "m",
+  "wallHeight": 2.7,
+  "wallThickness": 0.2,
+  "pins": [],
+  "walls": [
+    {
+      "a": [
+        0,
+        0
+      ],
+      "b": [
+        3,
+        0
+      ]
+    },
+    {
+      "a": [
+        3,
+        0
+      ],
+      "b": [
+        5,
+        0
+      ]
+    },
+    {
+      "a": [
+        5,
+        0
+      ],
+      "b": [
+        9,
+        0
+      ]
+    },
+    {
+      "a": [
+        0,
+        3
+      ],
+      "b": [
+        3,
+        3
+      ]
+    },
+    {
+      "a": [
+        3,
+        3
+      ],
+      "b": [
+        5,
+        3
+      ]
+    },
+    {
+      "a": [
+        5,
+        3
+      ],
+      "b": [
+        9,
+        3
+      ]
+    },
+    {
+      "a": [
+        0,
+        6
+      ],
+      "b": [
+        9,
+        6
+      ]
+    },
+    {
+      "a": [
+        0,
+        0
+      ],
+      "b": [
+        0,
+        3
+      ]
+    },
+    {
+      "a": [
+        0,
+        3
+      ],
+      "b": [
+        0,
+        6
+      ]
+    },
+    {
+      "a": [
+        3,
+        0
+      ],
+      "b": [
+        3,
+        3
+      ]
+    },
+    {
+      "a": [
+        5,
+        0
+      ],
+      "b": [
+        5,
+        3
+      ]
+    },
+    {
+      "a": [
+        9,
+        0
+      ],
+      "b": [
+        9,
+        3
+      ]
+    },
+    {
+      "a": [
+        9,
+        3
+      ],
+      "b": [
+        9,
+        6
+      ]
+    }
+  ],
+  "openings": [
+    {
+      "type": "door",
+      "wallIndex": 6,
+      "t": 0.3888888888888889,
+      "width": 2.4,
+      "height": 2.1,
+      "sill": 0
+    },
+    {
+      "type": "window",
+      "wallIndex": 6,
+      "t": 0.8055555555555556,
+      "width": 1.8,
+      "height": 1,
+      "sill": 1.1
+    },
+    {
+      "type": "window",
+      "wallIndex": 8,
+      "t": 0.5,
+      "width": 1.2,
+      "height": 1.2,
+      "sill": 0.9
+    },
+    {
+      "type": "window",
+      "wallIndex": 12,
+      "t": 0.5,
+      "width": 1.2,
+      "height": 1.2,
+      "sill": 0.9
+    },
+    {
+      "type": "door",
+      "wallIndex": 3,
+      "t": 0.7999999999999999,
+      "width": 0.82,
+      "height": 2.1,
+      "sill": 0
+    },
+    {
+      "type": "door",
+      "wallIndex": 4,
+      "t": 0.5,
+      "width": 0.82,
+      "height": 2.1,
+      "sill": 0
+    },
+    {
+      "type": "door",
+      "wallIndex": 5,
+      "t": 0.1499999999999999,
+      "width": 0.82,
+      "height": 2.1,
+      "sill": 0
+    },
+    {
+      "type": "window",
+      "wallIndex": 7,
+      "t": 0.5,
+      "width": 1.2,
+      "height": 1.2,
+      "sill": 0.9
+    },
+    {
+      "type": "window",
+      "wallIndex": 0,
+      "t": 0.5,
+      "width": 1.2,
+      "height": 1.2,
+      "sill": 0.9
+    },
+    {
+      "type": "window",
+      "wallIndex": 1,
+      "t": 0.5,
+      "width": 0.6,
+      "height": 0.6,
+      "sill": 1.5
+    },
+    {
+      "type": "window",
+      "wallIndex": 11,
+      "t": 0.5,
+      "width": 1.2,
+      "height": 1.2,
+      "sill": 0.9
+    },
+    {
+      "type": "window",
+      "wallIndex": 2,
+      "t": 0.5,
+      "width": 1.2,
+      "height": 1.2,
+      "sill": 0.9
+    }
+  ],
+  "rooms": [
+    {
+      "name": "Bath + Laundry",
+      "labelAt": [
+        4,
+        1.5
+      ]
+    },
+    {
+      "name": "Bedroom 2",
+      "labelAt": [
+        1.5,
+        1.5
+      ]
+    },
+    {
+      "name": "Bedroom 1",
+      "labelAt": [
+        7,
+        1.5
+      ]
+    },
+    {
+      "name": "Living + Kitchen",
+      "labelAt": [
+        4.333333333333333,
+        4
+      ]
+    }
+  ],
+  "furniture": [
+    {
+      "type": "bed",
+      "x": 8.1,
+      "z": 1.5,
+      "rot": 1.5707963267948966,
+      "w": 2,
+      "d": 1.6,
+      "hidden": false,
+      "auto": false,
+      "name": "Queen bed",
+      "locked": false
+    },
+    {
+      "type": "bed",
+      "x": 0.7,
+      "z": 1.5,
+      "rot": 1.5707963267948966,
+      "w": 2,
+      "d": 1.1,
+      "hidden": false,
+      "auto": false,
+      "name": "Single bed",
+      "locked": false
+    },
+    {
+      "type": "sofa",
+      "x": 1,
+      "z": 4.6,
+      "rot": 1.5707963267948966,
+      "w": 2.2,
+      "d": 0.9,
+      "hidden": false,
+      "auto": false,
+      "name": "",
+      "locked": false
+    },
+    {
+      "type": "table",
+      "x": 4.5,
+      "z": 4.4,
+      "rot": 0,
+      "w": 1.4,
+      "d": 0.8,
+      "hidden": false,
+      "auto": false,
+      "name": "",
+      "locked": false
+    },
+    {
+      "type": "table",
+      "x": 7.25,
+      "z": 5.55,
+      "rot": 0,
+      "w": 3,
+      "d": 0.6,
+      "hidden": false,
+      "auto": false,
+      "name": "Kitchen bench",
+      "locked": false
+    }
+  ]
+}

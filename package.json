@@ -1,0 +1,16 @@
+{
+  "name": "neeky-home-designer",
+  "version": "1.3.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "build": "node scripts/build-single.mjs",
+    "build:check": "node scripts/build-single.mjs --check",
+    "e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.55.1",
+    "esbuild": "0.25.10"
+  }
+}

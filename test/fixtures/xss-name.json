@@ -1,0 +1,28 @@
+{
+  "app": "neeky-home-designer",
+  "version": 2,
+  "title": "xss",
+  "unit": "m",
+  "dimMode": "outside",
+  "walls": [
+    { "a": [0, 0], "b": [4, 0] },
+    { "a": [4, 0], "b": [4, 3] },
+    { "a": [4, 3], "b": [0, 3] },
+    { "a": [0, 3], "b": [0, 0] }
+  ],
+  "openings": [],
+  "rooms": [
+    { "name": "<img src=x onerror=\"window.__xss=1\">", "labelAt": [2, 1.5] }
+  ],
+  "furniture": [
+    {
+      "type": "sofa",
+      "name": "<img src=x onerror=\"window.__xss=1\">",
+      "x": 0.7,
+      "z": 0.6,
+      "rot": 0,
+      "w": 0.6,
+      "d": 0.4
+    }
+  ]
+}
