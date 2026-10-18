@@ -1,0 +1,297 @@
+import {
+  APP,
+  DIM_MODES,
+  SCHEMA_VERSION,
+  STUMP_HEIGHT,
+  STUMP_SIZE,
+  WALL_HEIGHT,
+  WALL_THICK,
+} from "./constants.js";
+import { uid } from "./geom.js";
+
+export class PlanError extends Error {
+  constructor(message) {
+    super(Array.isArray(message) ? message.join(" ") : message);
+    this.name = "PlanError";
+  }
+}
+
+function finitePair(p) {
+  if (!Array.isArray(p) || p.length < 2) return null;
+  const x = Number(p[0]);
+  const z = Number(p[1]);
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
+  return [x, z];
+}
+
+function finiteNum(v, fallback = null) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+export function migratePlan(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new PlanError("The file is not a plan object.");
+  }
+  let version = data.version == null ? 1 : data.version;
+  if (typeof version !== "number" || !Number.isInteger(version)) {
+    throw new PlanError("Plan version is not a whole number this app understands.");
+  }
+  if (version > SCHEMA_VERSION) {
+    throw new PlanError(
+      `This plan uses schema ${version}. Neeky ${SCHEMA_VERSION} can open plans up to schema ${SCHEMA_VERSION}.`,
+    );
+  }
+  if (version < 1) throw new PlanError(`Plan schema ${version} is not a Neeky plan.`);
+  let cur = { ...data, version };
+  while (cur.version < SCHEMA_VERSION) {
+    if (cur.version === 1) cur = migrateV1(cur);
+    else throw new PlanError(`No migration from schema ${cur.version}.`);
+  }
+  return cur;
+}
+
+function migrateV1(data) {
+  return {
+    ...data,
+    version: 2,
+    title: typeof data.title === "string" ? data.title : "",
+    dimMode: DIM_MODES.includes(data.dimMode) ? data.dimMode : "centreline",
+    decks: Array.isArray(data.decks) ? data.decks : [],
+    steps: Array.isArray(data.steps) ? data.steps : [],
+    stumps: Array.isArray(data.stumps) ? data.stumps : [],
+  };
+}
+
+export function validatePlan(data) {
+  const errors = [];
+  if (!data || typeof data !== "object") return ["The file is not a plan object."];
+  if (data.app !== APP) errors.push("Not a Neeky plan file.");
+  if (data.version !== SCHEMA_VERSION) errors.push(`Expected schema ${SCHEMA_VERSION}.`);
+  if (data.dimMode != null && !DIM_MODES.includes(data.dimMode)) {
+    errors.push("Dimension mode must be outside, inside, or centreline.");
+  }
+  const walls = data.walls;
+  if (walls != null && !Array.isArray(walls)) errors.push("Walls must be a list.");
+  (Array.isArray(walls) ? walls : []).forEach((w, i) => {
+    if (!w || !finitePair(w.a) || !finitePair(w.b)) {
+      errors.push(`Wall ${i + 1} has a coordinate that is not a finite number.`);
+    }
+  });
+  const wallCount = Array.isArray(walls) ? walls.length : 0;
+  (Array.isArray(data.openings) ? data.openings : []).forEach((o, i) => {
+    if (!o || typeof o !== "object") {
+      errors.push(`Opening ${i + 1} is not an object.`);
+      return;
+    }
+    const idx = Number(o.wallIndex);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= wallCount) {
+      errors.push(`Opening ${i + 1} does not sit on a wall.`);
+    }
+    for (const key of ["t", "width", "height"]) {
+      if (!Number.isFinite(Number(o[key]))) errors.push(`Opening ${i + 1} has a ${key} that is not a finite number.`);
+    }
+    if (o.sill != null && !Number.isFinite(Number(o.sill))) errors.push(`Opening ${i + 1} has a sill that is not a finite number.`);
+    if (o.type != null && o.type !== "door" && o.type !== "window") errors.push(`Opening ${i + 1} is not a door or a window.`);
+  });
+  (Array.isArray(data.rooms) ? data.rooms : []).forEach((r, i) => {
+    if (!r || !finitePair(r.labelAt)) errors.push(`Room label ${i + 1} has a coordinate that is not a finite number.`);
+  });
+  (Array.isArray(data.furniture) ? data.furniture : []).forEach((f, i) => {
+    if (!f || typeof f !== "object") {
+      errors.push(`Furniture ${i + 1} is not an object.`);
+      return;
+    }
+    if (!Number.isFinite(Number(f.x)) || !Number.isFinite(Number(f.z))) {
+      errors.push(`Furniture ${i + 1} has a coordinate that is not a finite number.`);
+    }
+    for (const key of ["rot", "w", "d"]) {
+      if (f[key] != null && !Number.isFinite(Number(f[key]))) {
+        errors.push(`Furniture ${i + 1} has a ${key} that is not a finite number.`);
+      }
+    }
+  });
+  (Array.isArray(data.pins) ? data.pins : []).forEach((p, i) => {
+    if (!finitePair(p)) errors.push(`Pin ${i + 1} has a coordinate that is not a finite number.`);
+  });
+  (Array.isArray(data.decks) ? data.decks : []).forEach((d, i) => {
+    if (!d || ["x", "z", "w", "d"].some((k) => !Number.isFinite(Number(d[k])))) {
+      errors.push(`Deck ${i + 1} has a size or position that is not a finite number.`);
+    } else if (d.kind != null && d.kind !== "deck" && d.kind !== "veranda") {
+      errors.push(`Deck ${i + 1} must be a deck or a veranda.`);
+    }
+  });
+  (Array.isArray(data.steps) ? data.steps : []).forEach((s, i) => {
+    if (!s || !Number.isFinite(Number(s.x)) || !Number.isFinite(Number(s.z))) {
+      errors.push(`Steps ${i + 1} have a coordinate that is not a finite number.`);
+      return;
+    }
+    const count = Number(s.count);
+    if (!Number.isInteger(count) || count < 1 || count > 24) errors.push(`Steps ${i + 1} need a riser count from 1 to 24.`);
+    for (const key of ["width", "rise", "going", "rot"]) {
+      if (s[key] != null && !Number.isFinite(Number(s[key]))) errors.push(`Steps ${i + 1} have a ${key} that is not a finite number.`);
+    }
+  });
+  (Array.isArray(data.stumps) ? data.stumps : []).forEach((s, i) => {
+    if (!s || !Number.isFinite(Number(s.x)) || !Number.isFinite(Number(s.z))) {
+      errors.push(`Stump ${i + 1} has a coordinate that is not a finite number.`);
+    }
+  });
+  if (data.walls != null && !Array.isArray(data.walls)) errors.push("Walls must be a list.");
+  return errors;
+}
+
+export function serializePlan(state) {
+  const walls = (state.walls || []).map((w) => ({ a: [w.a[0], w.a[1]], b: [w.b[0], w.b[1]] }));
+  const openings = [];
+  for (const o of state.openings || []) {
+    const wallIndex = state.walls.findIndex((w) => w.id === o.wallId);
+    if (wallIndex < 0) continue;
+    openings.push({
+      type: o.type === "window" ? "window" : "door",
+      wallIndex,
+      t: o.t,
+      width: o.width,
+      height: o.height,
+      sill: o.sill ?? 0,
+    });
+  }
+  return {
+    app: APP,
+    version: SCHEMA_VERSION,
+    title: state.title || "",
+    unit: "m",
+    dimMode: DIM_MODES.includes(state.dimMode) ? state.dimMode : "centreline",
+    wallHeight: WALL_HEIGHT,
+    wallThickness: WALL_THICK,
+    pins: (state.pins || []).map((p) => [p[0], p[1]]),
+    walls,
+    openings,
+    rooms: (state.rooms || []).map((r) => ({ name: r.name, labelAt: [r.centroid[0], r.centroid[1]] })),
+    furniture: (state.furniture || []).map((f) => ({
+      type: f.type,
+      x: f.x,
+      z: f.z,
+      rot: f.rot || 0,
+      w: f.w,
+      d: f.d,
+      hidden: !!f.hidden,
+      auto: !!f.auto,
+      name: f.name || "",
+      locked: !!f.locked,
+    })),
+    decks: (state.decks || []).map((d) => ({
+      kind: d.kind === "veranda" ? "veranda" : "deck",
+      name: d.name || "",
+      x: d.x,
+      z: d.z,
+      w: d.w,
+      d: d.d,
+    })),
+    steps: (state.steps || []).map((s) => ({
+      x: s.x,
+      z: s.z,
+      rot: s.rot || 0,
+      width: s.width,
+      count: s.count,
+      rise: s.rise,
+      going: s.going,
+    })),
+    stumps: (state.stumps || []).map((s) => ({
+      x: s.x,
+      z: s.z,
+      size: s.size ?? STUMP_SIZE,
+      height: s.height ?? STUMP_HEIGHT,
+    })),
+  };
+}
+
+export function deserializePlan(data) {
+  const walls = (data.walls || []).map((w) => ({
+    id: uid("w"),
+    a: finitePair(w.a),
+    b: finitePair(w.b),
+  }));
+  const openings = (data.openings || []).map((o) => {
+    const wall = walls[o.wallIndex];
+    return {
+      id: uid(o.type === "window" ? "win" : "d"),
+      type: o.type === "window" ? "window" : "door",
+      wallId: wall.id,
+      t: Number(o.t),
+      width: Number(o.width),
+      height: Number(o.height),
+      sill: Number(o.sill || 0),
+    };
+  });
+  const labels = (data.rooms || []).map((r) => ({
+    name: String(r.name || "Room"),
+    at: finitePair(r.labelAt),
+  }));
+  const furniture = (data.furniture || []).map((f) => ({
+    id: uid("f"),
+    type: String(f.type || "plant"),
+    x: Number(f.x),
+    z: Number(f.z),
+    rot: finiteNum(f.rot, 0),
+    w: finiteNum(f.w, 0.45),
+    d: finiteNum(f.d, 0.45),
+    hidden: !!f.hidden,
+    auto: !!f.auto,
+    name: f.name ? String(f.name) : "",
+    locked: !!f.locked,
+  }));
+  const pins = (data.pins || []).map((p) => finitePair(p));
+  const decks = (data.decks || []).map((d) => ({
+    id: uid("deck"),
+    kind: d.kind === "veranda" ? "veranda" : "deck",
+    name: d.name ? String(d.name) : d.kind === "veranda" ? "Veranda" : "Deck",
+    x: Number(d.x),
+    z: Number(d.z),
+    w: Number(d.w),
+    d: Number(d.d),
+  }));
+  const steps = (data.steps || []).map((s) => ({
+    id: uid("steps"),
+    x: Number(s.x),
+    z: Number(s.z),
+    rot: finiteNum(s.rot, 0),
+    width: finiteNum(s.width, 1.2),
+    count: Number(s.count),
+    rise: finiteNum(s.rise, 0.15),
+    going: finiteNum(s.going, 0.28),
+  }));
+  const stumps = (data.stumps || []).map((s) => ({
+    id: uid("stump"),
+    x: Number(s.x),
+    z: Number(s.z),
+    size: finiteNum(s.size, STUMP_SIZE),
+    height: finiteNum(s.height, STUMP_HEIGHT),
+  }));
+  return {
+    title: data.title ? String(data.title) : "",
+    dimMode: DIM_MODES.includes(data.dimMode) ? data.dimMode : "centreline",
+    walls,
+    openings,
+    labels,
+    furniture,
+    pins,
+    decks,
+    steps,
+    stumps,
+  };
+}
+
+export function importPlanData(data) {
+  if (typeof data === "string") {
+    try {
+      data = JSON.parse(String(data).replace(/^\uFEFF/, ""));
+    } catch {
+      throw new PlanError("That file is not valid JSON.");
+    }
+  }
+  const migrated = migratePlan(data);
+  const errors = validatePlan(migrated);
+  if (errors.length) throw new PlanError(errors);
+  return deserializePlan(migrated);
+}

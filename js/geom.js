@@ -244,14 +244,49 @@ function angle(from, to) {
   return Math.atan2(to[1] - from[1], to[0] - from[0]);
 }
 
-export function computeRooms(walls) {
+function createVertexIndex(tol = 1e-4) {
   const verts = [];
-  const vid = (p) => {
-    const i = verts.findIndex((v) => dist(v, p) < 1e-4);
-    if (i >= 0) return i;
-    verts.push([...p]);
-    return verts.length - 1;
+  const buckets = new Map();
+  const scale = 1 / tol;
+  const key = (ix, iz) => `${ix},${iz}`;
+  return {
+    verts,
+    id(p) {
+      const ix = Math.round(p[0] * scale);
+      const iz = Math.round(p[1] * scale);
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          const list = buckets.get(key(ix + dx, iz + dz));
+          if (!list) continue;
+          for (const i of list) {
+            if (dist(verts[i], p) < tol) return i;
+          }
+        }
+      }
+      const i = verts.length;
+      verts.push([p[0], p[1]]);
+      const k = key(ix, iz);
+      let list = buckets.get(k);
+      if (!list) {
+        list = [];
+        buckets.set(k, list);
+      }
+      list.push(i);
+      return i;
+    },
   };
+}
+
+export function indexPoints(points, tol = 1e-4) {
+  const index = createVertexIndex(tol);
+  const ids = points.map((p) => index.id(p));
+  return { ids, verts: index.verts };
+}
+
+export function computeRooms(walls) {
+  const index = createVertexIndex();
+  const verts = index.verts;
+  const vid = (p) => index.id(p);
   const edges = [];
   for (const w of walls) {
     const u = vid(w.a);
@@ -410,86 +445,218 @@ export function insetArea(room) {
   return Math.max(0.1, a - (peri * WALL_THICK) / 2);
 }
 
-export function serializePlan(state) {
-  const walls = state.walls.map((w) => ({ a: w.a, b: w.b }));
-  const openings = state.openings.map((o) => {
-    const wallIndex = state.walls.findIndex((w) => w.id === o.wallId);
-    return {
-      type: o.type,
-      wallIndex,
-      t: o.t,
-      width: o.width,
-      height: o.height,
-      sill: o.sill ?? 0,
-    };
-  });
-  return {
-    app: "neeky-home-designer",
-    unit: "m",
-    wallHeight: 2.7,
-    wallThickness: 0.2,
-    pins: (state.pins || []).map((p) => [p[0], p[1]]),
-    walls,
-    openings,
-    rooms: state.rooms.map((r) => ({ name: r.name, labelAt: r.centroid })),
-    furniture: (state.furniture || []).map((f) => ({
-      type: f.type,
-      x: f.x,
-      z: f.z,
-      rot: f.rot || 0,
-      w: f.w,
-      d: f.d,
-      hidden: !!f.hidden,
-      auto: !!f.auto,
-      name: f.name || "",
-      locked: !!f.locked,
-    })),
-  };
-}
-
-export function deserializePlan(data) {
-  if (!data || data.app !== "neeky-home-designer") throw new Error("Not a Neeky plan file.");
-  const walls = (data.walls || []).map((w) => ({
-    id: uid("w"),
-    a: [Number(w.a[0]), Number(w.a[1])],
-    b: [Number(w.b[0]), Number(w.b[1])],
-  }));
-  const openings = (data.openings || [])
-    .map((o) => {
-      const wall = walls[o.wallIndex];
-      if (!wall) return null;
-      return {
-        id: uid(o.type === "window" ? "win" : "d"),
-        type: o.type === "window" ? "window" : "door",
-        wallId: wall.id,
-        t: Number(o.t),
-        width: Number(o.width),
-        height: Number(o.height),
-        sill: Number(o.sill || 0),
-      };
-    })
-    .filter(Boolean);
-  const labels = (data.rooms || []).map((r) => ({
-    name: String(r.name || "Room"),
-    at: [Number(r.labelAt[0]), Number(r.labelAt[1])],
-  }));
-  const furniture = (data.furniture || []).map((f) => ({
-    id: uid("f"),
-    type: String(f.type || "plant"),
-    x: Number(f.x),
-    z: Number(f.z),
-    rot: Number(f.rot || 0),
-    w: Number(f.w || 0.45),
-    d: Number(f.d || 0.45),
-    hidden: !!f.hidden,
-    auto: !!f.auto,
-    name: f.name ? String(f.name) : "",
-    locked: !!f.locked,
-  }));
-  const pins = (data.pins || []).map((p) => [Number(p[0]), Number(p[1])]).filter((p) => p.every(Number.isFinite));
-  return { walls, openings, labels, furniture, pins };
-}
-
 export function labelsFromRooms(rooms) {
   return rooms.map((r) => ({ name: r.name, at: [...r.centroid] }));
+}
+
+function graphOf(walls) {
+  const index = createVertexIndex();
+  const verts = index.verts;
+  const edges = [];
+  for (const w of walls) {
+    const u = index.id(w.a);
+    const v = index.id(w.b);
+    if (u !== v) edges.push({ u, v, wallId: w.id });
+  }
+  const adj = verts.map(() => []);
+  for (const e of edges) {
+    adj[e.u].push({ to: e.v, wallId: e.wallId });
+    adj[e.v].push({ to: e.u, wallId: e.wallId });
+  }
+  for (let i = 0; i < verts.length; i++) {
+    adj[i].sort((A, B) => angle(verts[i], verts[A.to]) - angle(verts[i], verts[B.to]));
+  }
+  return { verts, edges, adj };
+}
+
+function nextHalfEdge(adj, from, to) {
+  const list = adj[to];
+  const idx = list.findIndex((n) => n.to === from);
+  if (idx < 0) return null;
+  const n = list[(idx - 1 + list.length) % list.length];
+  return { from: to, to: n.to, wallId: n.wallId };
+}
+
+export function closedFaces(walls) {
+  const { verts, edges, adj } = graphOf(walls);
+  const used = new Set();
+  const faces = [];
+  for (const e of edges) {
+    for (const dir of [
+      { from: e.u, to: e.v },
+      { from: e.v, to: e.u },
+    ]) {
+      const startK = `${dir.from}>${dir.to}`;
+      if (used.has(startK)) continue;
+      const cycle = [];
+      let cur = dir;
+      let guard = 0;
+      let closed = false;
+      while (guard++ < 800) {
+        const k = `${cur.from}>${cur.to}`;
+        if (cycle.length && k === startK) {
+          closed = true;
+          break;
+        }
+        if (used.has(k)) break;
+        used.add(k);
+        cycle.push(cur);
+        const nxt = nextHalfEdge(adj, cur.from, cur.to);
+        if (!nxt) break;
+        cur = nxt;
+      }
+      if (!closed || cycle.length < 3) continue;
+      const points = cycle.map((h) => verts[h.from]);
+      faces.push({ points, area: shoelace(points) });
+    }
+  }
+  return faces;
+}
+
+export function outerRing(walls) {
+  let best = null;
+  for (const face of closedFaces(walls)) {
+    if (face.area < -1e-4 && (!best || face.area < best.area)) best = face;
+  }
+  return best ? best.points.map((p) => [...p]) : null;
+}
+
+function simplifyRing(pts) {
+  if (!pts || pts.length < 3) return pts;
+  const out = [];
+  const n = pts.length;
+  for (let i = 0; i < n; i++) {
+    const prev = pts[(i + n - 1) % n];
+    const cur = pts[i];
+    const next = pts[(i + 1) % n];
+    const cross = (cur[0] - prev[0]) * (next[1] - cur[1]) - (cur[1] - prev[1]) * (next[0] - cur[0]);
+    if (Math.abs(cross) < 1e-8 && dist(prev, next) > 1e-6) continue;
+    if (out.length && dist(out[out.length - 1], cur) < 1e-6) continue;
+    out.push(cur);
+  }
+  if (out.length >= 2 && dist(out[0], out[out.length - 1]) < 1e-6) out.pop();
+  return out.length >= 3 ? out : pts;
+}
+
+function intersectLines(p, d, q, e) {
+  const det = d[0] * e[1] - d[1] * e[0];
+  if (Math.abs(det) < 1e-12) return null;
+  const t = ((q[0] - p[0]) * e[1] - (q[1] - p[1]) * e[0]) / det;
+  return [p[0] + d[0] * t, p[1] + d[1] * t];
+}
+
+export function offsetPolygon(pts, dist) {
+  const ring = simplifyRing(pts);
+  if (!ring || ring.length < 3) return null;
+  const area = shoelace(ring);
+  if (Math.abs(area) < 1e-8) return null;
+  const n = ring.length;
+  const lines = [];
+  for (let i = 0; i < n; i++) {
+    const a = ring[i];
+    const b = ring[(i + 1) % n];
+    let dx = b[0] - a[0];
+    let dz = b[1] - a[1];
+    const len = Math.hypot(dx, dz);
+    if (len < 1e-8) return null;
+    dx /= len;
+    dz /= len;
+    let nx = -dz;
+    let nz = dx;
+    const outward = area > 0 ? -1 : 1;
+    nx *= outward;
+    nz *= outward;
+    lines.push({ p: [a[0] + nx * dist, a[1] + nz * dist], d: [dx, dz] });
+  }
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const prev = lines[(i + n - 1) % n];
+    const cur = lines[i];
+    const hit = intersectLines(prev.p, prev.d, cur.p, cur.d);
+    if (!hit) return null;
+    out.push(hit);
+  }
+  if (Math.abs(shoelace(out)) < 1e-6) return null;
+  return out;
+}
+
+export function dimensionBox(walls, mode = "centreline", thick = WALL_THICK) {
+  const b = bounds(walls);
+  if (!b) return null;
+  const half = thick / 2;
+  const delta = mode === "outside" ? half : mode === "inside" ? -half : 0;
+  const minX = b.minX - delta;
+  const maxX = b.maxX + delta;
+  const minZ = b.minZ - delta;
+  const maxZ = b.maxZ + delta;
+  return { minX, minZ, maxX, maxZ, w: maxX - minX, h: maxZ - minZ, mode };
+}
+
+export function internalArea(room, thick = WALL_THICK) {
+  const inset = offsetPolygon(room.points, -thick / 2);
+  if (inset) {
+    const a = Math.abs(shoelace(inset));
+    if (Number.isFinite(a) && a > 0) return a;
+  }
+  return insetArea(room);
+}
+
+export function grossFloorArea(walls, thick = WALL_THICK) {
+  const ring = outerRing(walls);
+  if (ring) {
+    const grown = offsetPolygon(ring, thick / 2);
+    if (grown) {
+      const a = Math.abs(shoelace(grown));
+      if (Number.isFinite(a) && a > 0) return a;
+    }
+  }
+  const box = dimensionBox(walls, "outside", thick);
+  return box ? Math.max(0, box.w * box.h) : 0;
+}
+
+export function sceneBounds(walls, points = []) {
+  let minX = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxZ = -Infinity;
+  const take = (p) => {
+    if (!p || !Number.isFinite(p[0]) || !Number.isFinite(p[1])) return;
+    minX = Math.min(minX, p[0]);
+    minZ = Math.min(minZ, p[1]);
+    maxX = Math.max(maxX, p[0]);
+    maxZ = Math.max(maxZ, p[1]);
+  };
+  for (const w of walls || []) {
+    take(w.a);
+    take(w.b);
+  }
+  for (const p of points) take(p);
+  if (!Number.isFinite(minX)) return null;
+  return { minX, minZ, maxX, maxZ, w: maxX - minX, h: maxZ - minZ };
+}
+
+function prunePins(walls, pins) {
+  const verts = [];
+  for (const w of walls) verts.push(w.a, w.b);
+  return (pins || []).filter((p) => verts.some((v) => dist(v, p) < 1e-3));
+}
+
+export function normalizePlan(plan) {
+  const pins = (plan.pins || []).map((p) => [...p]);
+  const oldWalls = (plan.walls || []).map((w) => ({ ...w, a: [...w.a], b: [...w.b] }));
+  const walls = mergeCollinear(planarize(oldWalls), pins);
+  const openings = rebindOpenings(plan.openings || [], oldWalls, walls);
+  const rooms = assignLabels(computeRooms(walls), plan.labels || []);
+  return {
+    ...plan,
+    walls,
+    openings,
+    pins: prunePins(walls, pins),
+    rooms,
+    labels: labelsFromRooms(rooms),
+    furniture: plan.furniture || [],
+    decks: plan.decks || [],
+    steps: plan.steps || [],
+    stumps: plan.stumps || [],
+  };
 }

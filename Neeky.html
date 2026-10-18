@@ -97,6 +97,13 @@
   flex-shrink: 0;
 }
 
+.cluster {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -238,14 +245,15 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  height: 36px;
-  padding: 0 12px 0 12px;
-  padding-right: 7rem;
+  min-height: 36px;
+  height: auto;
+  padding: 6px 12px;
   background: var(--paper-2);
   border-top: 1px solid var(--border);
   color: var(--muted);
   font-size: 12px;
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 .status .grow {
@@ -571,9 +579,13 @@
   gap: 6px;
 }
 
+.palette .furn-grid {
+  overflow-x: auto;
+}
+
 .palette .furn-item {
-  flex: 1;
-  min-width: 0;
+  flex: 1 0 76px;
+  min-width: 76px;
   flex-direction: row;
   justify-content: center;
   padding: 6px 8px;
@@ -622,7 +634,10 @@
 
 .app[data-tool="wall"] .plan-pane canvas,
 .app[data-tool="door"] .plan-pane canvas,
-.app[data-tool="window"] .plan-pane canvas {
+.app[data-tool="window"] .plan-pane canvas,
+.app[data-tool="deck"] .plan-pane canvas,
+.app[data-tool="steps"] .plan-pane canvas,
+.app[data-tool="stumps"] .plan-pane canvas {
   cursor: crosshair;
 }
 
@@ -630,7 +645,49 @@
   cursor: copy;
 }
 
+.toast {
+  position: absolute;
+  z-index: 60;
+  left: 12px;
+  right: 12px;
+  bottom: 52px;
+  padding: 10px 12px;
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.toast[hidden] {
+  display: none !important;
+}
+
 @media (max-width: 720px) {
+  .toolbar {
+    flex-wrap: wrap;
+    height: auto;
+    overflow: visible;
+    padding: 6px 8px 8px;
+    row-gap: 6px;
+  }
+  .view-cluster {
+    flex: 1;
+    justify-content: flex-end;
+    min-width: 0;
+  }
+  .tools-cluster {
+    flex: 1 0 100%;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+  .tool {
+    min-width: 44px;
+    height: 44px;
+  }
+  .snap-btn {
+    min-height: 32px;
+  }
   .stage {
     grid-template-columns: 1fr;
     grid-template-rows: 1fr 1fr;
@@ -842,7 +899,6 @@
     transition: none;
   }
 }
-
       html, body { margin: 0; height: 100%; background: #f3efe6; }
     </style>
   </head>
@@ -860,10 +916,14 @@ var __export = (target, all) => {
 };
 
 // js/constants.js
-var STORAGE_KEY, WALL_THICK, WALL_HEIGHT, DOOR_W, DOOR_H, WIN_W, WIN_H, WIN_SILL, SNAP, SNAP_FINE, MINOR, MAJOR, MIN_ROOM_AREA, COLORS;
+var APP, APP_VERSION_LABEL, SCHEMA_VERSION, STORAGE_KEY, DIM_MODES, WALL_THICK, WALL_HEIGHT, DOOR_W, DOOR_H, WIN_W, WIN_H, WIN_SILL, SNAP, SNAP_FINE, MINOR, MAJOR, MIN_ROOM_AREA, STUMP_SPACING, STUMP_SIZE, STUMP_HEIGHT, COLORS;
 var init_constants = __esm({
   "js/constants.js"() {
+    APP = "neeky-home-designer";
+    APP_VERSION_LABEL = "1.3";
+    SCHEMA_VERSION = 2;
     STORAGE_KEY = "neeky-home-designer-v2";
+    DIM_MODES = ["centreline", "inside", "outside"];
     WALL_THICK = 0.2;
     WALL_HEIGHT = 2.7;
     DOOR_W = 0.9;
@@ -876,6 +936,9 @@ var init_constants = __esm({
     MINOR = 0.25;
     MAJOR = 1;
     MIN_ROOM_AREA = 0.8;
+    STUMP_SPACING = 1.5;
+    STUMP_SIZE = 0.15;
+    STUMP_HEIGHT = 0.45;
     COLORS = {
       paper: "#f3efe6",
       paper2: "#ebe6da",
@@ -912,7 +975,7 @@ function fmt(n) {
   return `${(Math.round(n * 100) / 100).toFixed(2)} m`;
 }
 function fmtArea(n) {
-  return `${(Math.round(n * 100) / 100).toFixed(2)} m\xB2`;
+  return `${(Math.round(n * 100) / 100).toFixed(2)} m²`;
 }
 function wallLen(w) {
   return dist(w.a, w.b);
@@ -1111,14 +1174,42 @@ function centroid(pts) {
 function angle(from, to) {
   return Math.atan2(to[1] - from[1], to[0] - from[0]);
 }
-function computeRooms(walls) {
+function createVertexIndex(tol = 1e-4) {
   const verts = [];
-  const vid = (p) => {
-    const i = verts.findIndex((v) => dist(v, p) < 1e-4);
-    if (i >= 0) return i;
-    verts.push([...p]);
-    return verts.length - 1;
+  const buckets = /* @__PURE__ */ new Map();
+  const scale = 1 / tol;
+  const key = (ix, iz) => `${ix},${iz}`;
+  return {
+    verts,
+    id(p) {
+      const ix = Math.round(p[0] * scale);
+      const iz = Math.round(p[1] * scale);
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          const list2 = buckets.get(key(ix + dx, iz + dz));
+          if (!list2) continue;
+          for (const i2 of list2) {
+            if (dist(verts[i2], p) < tol) return i2;
+          }
+        }
+      }
+      const i = verts.length;
+      verts.push([p[0], p[1]]);
+      const k = key(ix, iz);
+      let list = buckets.get(k);
+      if (!list) {
+        list = [];
+        buckets.set(k, list);
+      }
+      list.push(i);
+      return i;
+    }
   };
+}
+function computeRooms(walls) {
+  const index = createVertexIndex();
+  const verts = index.verts;
+  const vid = (p) => index.id(p);
   const edges = [];
   for (const w of walls) {
     const u = vid(w.a);
@@ -1269,88 +1360,304 @@ function insetArea(room) {
   }, 0);
   return Math.max(0.1, a - peri * WALL_THICK / 2);
 }
-function serializePlan(state) {
-  const walls = state.walls.map((w) => ({ a: w.a, b: w.b }));
-  const openings = state.openings.map((o) => {
-    const wallIndex = state.walls.findIndex((w) => w.id === o.wallId);
-    return {
-      type: o.type,
-      wallIndex,
-      t: o.t,
-      width: o.width,
-      height: o.height,
-      sill: o.sill ?? 0
-    };
-  });
-  return {
-    app: "neeky-home-designer",
-    unit: "m",
-    wallHeight: 2.7,
-    wallThickness: 0.2,
-    pins: (state.pins || []).map((p) => [p[0], p[1]]),
-    walls,
-    openings,
-    rooms: state.rooms.map((r) => ({ name: r.name, labelAt: r.centroid })),
-    furniture: (state.furniture || []).map((f) => ({
-      type: f.type,
-      x: f.x,
-      z: f.z,
-      rot: f.rot || 0,
-      w: f.w,
-      d: f.d,
-      hidden: !!f.hidden,
-      auto: !!f.auto,
-      name: f.name || "",
-      locked: !!f.locked
-    }))
-  };
-}
-function deserializePlan(data) {
-  if (!data || data.app !== "neeky-home-designer") throw new Error("Not a Neeky plan file.");
-  const walls = (data.walls || []).map((w) => ({
-    id: uid("w"),
-    a: [Number(w.a[0]), Number(w.a[1])],
-    b: [Number(w.b[0]), Number(w.b[1])]
-  }));
-  const openings = (data.openings || []).map((o) => {
-    const wall = walls[o.wallIndex];
-    if (!wall) return null;
-    return {
-      id: uid(o.type === "window" ? "win" : "d"),
-      type: o.type === "window" ? "window" : "door",
-      wallId: wall.id,
-      t: Number(o.t),
-      width: Number(o.width),
-      height: Number(o.height),
-      sill: Number(o.sill || 0)
-    };
-  }).filter(Boolean);
-  const labels = (data.rooms || []).map((r) => ({
-    name: String(r.name || "Room"),
-    at: [Number(r.labelAt[0]), Number(r.labelAt[1])]
-  }));
-  const furniture = (data.furniture || []).map((f) => ({
-    id: uid("f"),
-    type: String(f.type || "plant"),
-    x: Number(f.x),
-    z: Number(f.z),
-    rot: Number(f.rot || 0),
-    w: Number(f.w || 0.45),
-    d: Number(f.d || 0.45),
-    hidden: !!f.hidden,
-    auto: !!f.auto,
-    name: f.name ? String(f.name) : "",
-    locked: !!f.locked
-  }));
-  const pins = (data.pins || []).map((p) => [Number(p[0]), Number(p[1])]).filter((p) => p.every(Number.isFinite));
-  return { walls, openings, labels, furniture, pins };
-}
 function labelsFromRooms(rooms) {
   return rooms.map((r) => ({ name: r.name, at: [...r.centroid] }));
+}
+function graphOf(walls) {
+  const index = createVertexIndex();
+  const verts = index.verts;
+  const edges = [];
+  for (const w of walls) {
+    const u = index.id(w.a);
+    const v = index.id(w.b);
+    if (u !== v) edges.push({ u, v, wallId: w.id });
+  }
+  const adj = verts.map(() => []);
+  for (const e of edges) {
+    adj[e.u].push({ to: e.v, wallId: e.wallId });
+    adj[e.v].push({ to: e.u, wallId: e.wallId });
+  }
+  for (let i = 0; i < verts.length; i++) {
+    adj[i].sort((A, B) => angle(verts[i], verts[A.to]) - angle(verts[i], verts[B.to]));
+  }
+  return { verts, edges, adj };
+}
+function nextHalfEdge(adj, from, to) {
+  const list = adj[to];
+  const idx = list.findIndex((n2) => n2.to === from);
+  if (idx < 0) return null;
+  const n = list[(idx - 1 + list.length) % list.length];
+  return { from: to, to: n.to, wallId: n.wallId };
+}
+function closedFaces(walls) {
+  const { verts, edges, adj } = graphOf(walls);
+  const used = /* @__PURE__ */ new Set();
+  const faces = [];
+  for (const e of edges) {
+    for (const dir of [
+      { from: e.u, to: e.v },
+      { from: e.v, to: e.u }
+    ]) {
+      const startK = `${dir.from}>${dir.to}`;
+      if (used.has(startK)) continue;
+      const cycle = [];
+      let cur = dir;
+      let guard = 0;
+      let closed = false;
+      while (guard++ < 800) {
+        const k = `${cur.from}>${cur.to}`;
+        if (cycle.length && k === startK) {
+          closed = true;
+          break;
+        }
+        if (used.has(k)) break;
+        used.add(k);
+        cycle.push(cur);
+        const nxt = nextHalfEdge(adj, cur.from, cur.to);
+        if (!nxt) break;
+        cur = nxt;
+      }
+      if (!closed || cycle.length < 3) continue;
+      const points = cycle.map((h) => verts[h.from]);
+      faces.push({ points, area: shoelace(points) });
+    }
+  }
+  return faces;
+}
+function outerRing(walls) {
+  let best = null;
+  for (const face of closedFaces(walls)) {
+    if (face.area < -1e-4 && (!best || face.area < best.area)) best = face;
+  }
+  return best ? best.points.map((p) => [...p]) : null;
+}
+function simplifyRing(pts) {
+  if (!pts || pts.length < 3) return pts;
+  const out = [];
+  const n = pts.length;
+  for (let i = 0; i < n; i++) {
+    const prev = pts[(i + n - 1) % n];
+    const cur = pts[i];
+    const next = pts[(i + 1) % n];
+    const cross = (cur[0] - prev[0]) * (next[1] - cur[1]) - (cur[1] - prev[1]) * (next[0] - cur[0]);
+    if (Math.abs(cross) < 1e-8 && dist(prev, next) > 1e-6) continue;
+    if (out.length && dist(out[out.length - 1], cur) < 1e-6) continue;
+    out.push(cur);
+  }
+  if (out.length >= 2 && dist(out[0], out[out.length - 1]) < 1e-6) out.pop();
+  return out.length >= 3 ? out : pts;
+}
+function intersectLines(p, d, q, e) {
+  const det = d[0] * e[1] - d[1] * e[0];
+  if (Math.abs(det) < 1e-12) return null;
+  const t = ((q[0] - p[0]) * e[1] - (q[1] - p[1]) * e[0]) / det;
+  return [p[0] + d[0] * t, p[1] + d[1] * t];
+}
+function offsetPolygon(pts, dist2) {
+  const ring = simplifyRing(pts);
+  if (!ring || ring.length < 3) return null;
+  const area2 = shoelace(ring);
+  if (Math.abs(area2) < 1e-8) return null;
+  const n = ring.length;
+  const lines = [];
+  for (let i = 0; i < n; i++) {
+    const a = ring[i];
+    const b = ring[(i + 1) % n];
+    let dx = b[0] - a[0];
+    let dz = b[1] - a[1];
+    const len = Math.hypot(dx, dz);
+    if (len < 1e-8) return null;
+    dx /= len;
+    dz /= len;
+    let nx = -dz;
+    let nz = dx;
+    const outward = area2 > 0 ? -1 : 1;
+    nx *= outward;
+    nz *= outward;
+    lines.push({ p: [a[0] + nx * dist2, a[1] + nz * dist2], d: [dx, dz] });
+  }
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const prev = lines[(i + n - 1) % n];
+    const cur = lines[i];
+    const hit = intersectLines(prev.p, prev.d, cur.p, cur.d);
+    if (!hit) return null;
+    out.push(hit);
+  }
+  if (Math.abs(shoelace(out)) < 1e-6) return null;
+  return out;
+}
+function dimensionBox(walls, mode = "centreline", thick = WALL_THICK) {
+  const b = bounds(walls);
+  if (!b) return null;
+  const half = thick / 2;
+  const delta = mode === "outside" ? half : mode === "inside" ? -half : 0;
+  const minX = b.minX - delta;
+  const maxX = b.maxX + delta;
+  const minZ = b.minZ - delta;
+  const maxZ = b.maxZ + delta;
+  return { minX, minZ, maxX, maxZ, w: maxX - minX, h: maxZ - minZ, mode };
+}
+function internalArea(room, thick = WALL_THICK) {
+  const inset = offsetPolygon(room.points, -thick / 2);
+  if (inset) {
+    const a = Math.abs(shoelace(inset));
+    if (Number.isFinite(a) && a > 0) return a;
+  }
+  return insetArea(room);
+}
+function grossFloorArea(walls, thick = WALL_THICK) {
+  const ring = outerRing(walls);
+  if (ring) {
+    const grown = offsetPolygon(ring, thick / 2);
+    if (grown) {
+      const a = Math.abs(shoelace(grown));
+      if (Number.isFinite(a) && a > 0) return a;
+    }
+  }
+  const box = dimensionBox(walls, "outside", thick);
+  return box ? Math.max(0, box.w * box.h) : 0;
+}
+function sceneBounds(walls, points = []) {
+  let minX = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxZ = -Infinity;
+  const take = (p) => {
+    if (!p || !Number.isFinite(p[0]) || !Number.isFinite(p[1])) return;
+    minX = Math.min(minX, p[0]);
+    minZ = Math.min(minZ, p[1]);
+    maxX = Math.max(maxX, p[0]);
+    maxZ = Math.max(maxZ, p[1]);
+  };
+  for (const w of walls || []) {
+    take(w.a);
+    take(w.b);
+  }
+  for (const p of points) take(p);
+  if (!Number.isFinite(minX)) return null;
+  return { minX, minZ, maxX, maxZ, w: maxX - minX, h: maxZ - minZ };
+}
+function prunePins(walls, pins) {
+  const verts = [];
+  for (const w of walls) verts.push(w.a, w.b);
+  return (pins || []).filter((p) => verts.some((v) => dist(v, p) < 1e-3));
+}
+function normalizePlan(plan) {
+  const pins = (plan.pins || []).map((p) => [...p]);
+  const oldWalls = (plan.walls || []).map((w) => ({ ...w, a: [...w.a], b: [...w.b] }));
+  const walls = mergeCollinear(planarize(oldWalls), pins);
+  const openings = rebindOpenings(plan.openings || [], oldWalls, walls);
+  const rooms = assignLabels(computeRooms(walls), plan.labels || []);
+  return {
+    ...plan,
+    walls,
+    openings,
+    pins: prunePins(walls, pins),
+    rooms,
+    labels: labelsFromRooms(rooms),
+    furniture: plan.furniture || [],
+    decks: plan.decks || [],
+    steps: plan.steps || [],
+    stumps: plan.stumps || []
+  };
 }
 var init_geom = __esm({
   "js/geom.js"() {
     init_constants();
+  }
+});
+
+// js/elements.js
+function normalizeDeck(d) {
+  const x = d.w < 0 ? d.x + d.w : d.x;
+  const z = d.d < 0 ? d.z + d.d : d.z;
+  return { ...d, x, z, w: Math.abs(d.w), d: Math.abs(d.d) };
+}
+function deckCorners(d) {
+  const r = normalizeDeck(d);
+  return [
+    [r.x, r.z],
+    [r.x + r.w, r.z],
+    [r.x + r.w, r.z + r.d],
+    [r.x, r.z + r.d]
+  ];
+}
+function pointInDeck(p, d) {
+  const r = normalizeDeck(d);
+  return p[0] >= r.x - 1e-6 && p[0] <= r.x + r.w + 1e-6 && p[1] >= r.z - 1e-6 && p[1] <= r.z + r.d + 1e-6;
+}
+function stepCorners(step) {
+  const ang = step.rot || 0;
+  const c = Math.cos(ang);
+  const s = Math.sin(ang);
+  const len = (step.count || 1) * (step.going || 0.28);
+  const hw = (step.width || 1.2) / 2;
+  const px2 = -s;
+  const pz2 = c;
+  const x = step.x;
+  const z = step.z;
+  return [
+    [x + px2 * hw, z + pz2 * hw],
+    [x - px2 * hw, z - pz2 * hw],
+    [x + c * len - px2 * hw, z + s * len - pz2 * hw],
+    [x + c * len + px2 * hw, z + s * len + pz2 * hw]
+  ];
+}
+function pointInStep(p, step) {
+  const pts = stepCorners(step);
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = pts[i][0];
+    const zi = pts[i][1];
+    const xj = pts[j][0];
+    const zj = pts[j][1];
+    const hit = zi > p[1] !== zj > p[1] && p[0] < (xj - xi) * (p[1] - zi) / (zj - zi + 1e-12) + xi;
+    if (hit) inside = !inside;
+  }
+  return inside;
+}
+function gridAxis(a, b, spacing) {
+  const start = Math.min(a, b);
+  const end = Math.max(a, b);
+  const out = [round3(start)];
+  let x = start;
+  while (x + spacing < end - 1e-6) {
+    x += spacing;
+    out.push(round3(x));
+  }
+  if (Math.abs(out[out.length - 1] - end) > 1e-3) out.push(round3(end));
+  return out;
+}
+function round3(n) {
+  return Math.round(n * 1e3) / 1e3;
+}
+function stumpGrid(box, opts = {}) {
+  if (!box) return [];
+  const spacing = opts.spacing || STUMP_SPACING;
+  const size = opts.size || STUMP_SIZE;
+  const height = opts.height || STUMP_HEIGHT;
+  const xs = gridAxis(box.minX, box.maxX, spacing);
+  const zs = gridAxis(box.minZ, box.maxZ, spacing);
+  const out = [];
+  for (const z of zs) {
+    for (const x of xs) {
+      out.push({ id: uid("stump"), x, z, size, height });
+    }
+  }
+  return out;
+}
+function elementPoints(state) {
+  const pts = [];
+  for (const d of state.decks || []) pts.push(...deckCorners(d));
+  for (const s of state.steps || []) pts.push(...stepCorners(s));
+  for (const s of state.stumps || []) pts.push([s.x, s.z]);
+  return pts;
+}
+var init_elements = __esm({
+  "js/elements.js"() {
+    init_constants();
+    init_geom();
   }
 });
 
@@ -1454,16 +1761,16 @@ function hitsDoorway(f, walls, openings) {
   }
   return false;
 }
-function containsPoint(f, p) {
+function containsPoint(f, p, pad = 0.06) {
   if (f.hidden) return false;
-  if (f.type === "plant") return dist(p, [f.x, f.z]) <= Math.max(f.w, f.d) / 2 + 0.08;
+  if (f.type === "plant") return dist(p, [f.x, f.z]) <= Math.max(f.w, f.d) / 2 + pad + 0.02;
   const c = Math.cos(-f.rot);
   const s = Math.sin(-f.rot);
   const dx = p[0] - f.x;
   const dz = p[1] - f.z;
   const lx = dx * c - dz * s;
   const lz = dx * s + dz * c;
-  return Math.abs(lx) <= f.w / 2 + 0.06 && Math.abs(lz) <= f.d / 2 + 0.06;
+  return Math.abs(lx) <= f.w / 2 + pad && Math.abs(lz) <= f.d / 2 + pad;
 }
 function insideRoom(p, rooms) {
   return rooms.some((r) => pointInPoly(p, r.points));
@@ -1690,7 +1997,7 @@ function drawFurniture2d(ctx, f, cam, toScreen, opts = {}) {
     ctx.restore();
     return;
   }
-  const fill2 = f.type === "tank" ? invalid ? "rgba(143,61,50,0.16)" : "rgba(196, 176, 138, 0.85)" : f.type === "bed" ? "rgba(232, 224, 212, 0.95)" : f.type === "sofa" ? "rgba(92, 107, 98, 0.88)" : "rgba(166, 138, 96, 0.9)";
+  const fill2 = f.type === "tank" ? invalid ? "rgba(143,61,50,0.16)" : "rgba(196, 176, 138, 0.85)" : f.type === "bed" ? "rgba(232, 224, 212, 0.95)" : f.type === "sofa" ? "rgba(92, 107, 98, 0.88)" : f.type === "bench" ? "rgba(184, 154, 110, 0.95)" : f.type === "robe" ? "rgba(232, 224, 208, 0.95)" : f.type === "wc" ? "rgba(247, 244, 236, 0.98)" : "rgba(166, 138, 96, 0.9)";
   ctx.fillStyle = fill2;
   ctx.strokeStyle = invalid ? "#8f3d32" : selected ? COLORS.accent : COLORS.ink;
   ctx.lineWidth = selected ? 2 : 1.2;
@@ -1714,6 +2021,26 @@ function drawFurniture2d(ctx, f, cam, toScreen, opts = {}) {
   } else if (f.type === "table") {
     ctx.strokeStyle = "rgba(28,25,23,0.35)";
     ctx.strokeRect(-sx / 2 + 6, -sy / 2 + 6, sx - 12, sy - 12);
+  } else if (f.type === "bench") {
+    ctx.strokeStyle = "rgba(28,25,23,0.35)";
+    ctx.strokeRect(-sx / 2 + 4, -sy / 2 + 4, sx - 8, sy * 0.35);
+    ctx.beginPath();
+    ctx.arc(-sx * 0.22, 0, Math.min(sx, sy) * 0.12, 0, Math.PI * 2);
+    ctx.stroke();
+  } else if (f.type === "robe") {
+    ctx.strokeStyle = "rgba(28,25,23,0.4)";
+    ctx.beginPath();
+    ctx.moveTo(0, -sy / 2);
+    ctx.lineTo(0, sy / 2);
+    ctx.moveTo(-sx / 2, 0);
+    ctx.lineTo(sx / 2, 0);
+    ctx.stroke();
+  } else if (f.type === "wc") {
+    ctx.strokeStyle = COLORS.ink;
+    ctx.beginPath();
+    ctx.ellipse(0, sy * 0.08, sx * 0.32, sy * 0.28, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeRect(-sx * 0.28, -sy / 2 + 2, sx * 0.56, sy * 0.22);
   } else if (f.type === "tank") {
     ctx.strokeStyle = COLORS.frame;
     ctx.lineWidth = 2;
@@ -1777,6 +2104,9 @@ function addFurniture3d(THREE, parent, f, selected) {
   else if (f.type === "sofa") addSofa3d(THREE, group, selected);
   else if (f.type === "bed") addBed3d(THREE, group, selected);
   else if (f.type === "table") addTable3d(THREE, group, selected);
+  else if (f.type === "bench") addBench3d(THREE, group);
+  else if (f.type === "robe") addRobe3d(THREE, group);
+  else if (f.type === "wc") addWc3d(THREE, group);
   else if (f.type === "tank") addTank3d(THREE, group, f, selected);
   if (accent) {
     group.traverse((o) => {
@@ -1861,6 +2191,45 @@ function addBed3d(THREE, group, selected) {
     p.position.set(-0.62, 0.46, z);
     group.add(p);
   }
+}
+function addBench3d(THREE, group) {
+  const top = new THREE.Mesh(
+    new THREE.BoxGeometry(2.4, 0.04, 0.6),
+    new THREE.MeshLambertMaterial({ color: 12887412 })
+  );
+  top.position.y = 0.9;
+  top.castShadow = true;
+  group.add(top);
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(2.32, 0.72, 0.52),
+    new THREE.MeshLambertMaterial({ color: 15261908 })
+  );
+  body.position.set(0, 0.5, 0.02);
+  group.add(body);
+}
+function addRobe3d(THREE, group) {
+  const carcass = new THREE.Mesh(
+    new THREE.BoxGeometry(1.8, 2.1, 0.58),
+    new THREE.MeshLambertMaterial({ color: 14998992 })
+  );
+  carcass.position.y = 1.05;
+  carcass.castShadow = true;
+  group.add(carcass);
+  const seam = new THREE.Mesh(
+    new THREE.BoxGeometry(0.02, 2, 0.02),
+    new THREE.MeshLambertMaterial({ color: 2894376 })
+  );
+  seam.position.set(0, 1.05, 0.29);
+  group.add(seam);
+}
+function addWc3d(THREE, group) {
+  const ceramic = new THREE.MeshLambertMaterial({ color: 16052714 });
+  const pan = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.14, 0.12, 16), ceramic);
+  pan.position.set(0, 0.4, 0.08);
+  group.add(pan);
+  const cistern = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.32, 0.16), ceramic);
+  cistern.position.set(0, 0.55, -0.24);
+  group.add(cistern);
 }
 function addTable3d(THREE, group) {
   const wood = new THREE.MeshLambertMaterial({ color: 9071172 });
@@ -1964,6 +2333,9 @@ var init_furniture = __esm({
       sofa: { w: 2.2, d: 0.9, label: "Sofa" },
       bed: { w: 2, d: 1.6, label: "Bed" },
       table: { w: 1.4, d: 0.8, label: "Table" },
+      bench: { w: 2.4, d: 0.6, label: "Bench" },
+      robe: { w: 1.8, d: 0.6, label: "Robe" },
+      wc: { w: 0.4, d: 0.7, label: "WC" },
       tank: { w: 1.8, d: 0.6, label: "Blue-tongue" }
     };
     TANK_W = 1.8;
@@ -36329,8 +36701,9 @@ function createView3D(canvas) {
   const frameMat = new MeshLambertMaterial({ color: COLORS.frame });
   const doorMat = new MeshLambertMaterial({ color: 13350810 });
   function resize() {
-    const w = Math.max(1, canvas.clientWidth);
-    const h = Math.max(1, canvas.clientHeight);
+    const el = canvas.parentElement || canvas;
+    const w = Math.max(1, el.clientWidth);
+    const h = Math.max(1, el.clientHeight);
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
@@ -36491,10 +36864,86 @@ function createView3D(canvas) {
     house.add(mesh);
     roomMeshes.push(mesh);
   }
+  const timber = new MeshLambertMaterial({ color: 12887412 });
+  const stumpMat = new MeshLambertMaterial({ color: 7033668 });
+  const bearerMat = new MeshLambertMaterial({ color: 6047286 });
+  const stepMat = new MeshLambertMaterial({ color: 14273462 });
+  function addDeck(deck, drop) {
+    const r = normalizeDeck(deck);
+    if (r.w < 0.05 || r.d < 0.05) return;
+    const slab = new Mesh(new BoxGeometry(r.w, 0.08, r.d), timber);
+    slab.position.set(r.x + r.w / 2, 0.04, r.z + r.d / 2);
+    slab.receiveShadow = true;
+    slab.castShadow = true;
+    slab.userData.deckId = deck.id;
+    house.add(slab);
+    if (deck.kind === "veranda") {
+      const roof = new Mesh(
+        new BoxGeometry(r.w, 0.05, r.d),
+        new MeshLambertMaterial({ color: 15723748 })
+      );
+      roof.position.set(r.x + r.w / 2, 2.35, r.z + r.d / 2);
+      house.add(roof);
+      for (const p of deckCorners(r)) {
+        const post = new Mesh(new BoxGeometry(0.09, 2.35 + drop, 0.09), stumpMat);
+        post.position.set(p[0], 2.35 / 2 - drop / 2, p[1]);
+        house.add(post);
+      }
+    }
+  }
+  function addSteps(step) {
+    const g = new Group();
+    g.position.set(step.x, 0, step.z);
+    g.rotation.y = -(step.rot || 0);
+    g.userData.stepId = step.id;
+    const rise = step.rise || 0.15;
+    const going = step.going || 0.28;
+    const count = step.count || 3;
+    const width = step.width || 1.2;
+    for (let i = 0; i < count; i++) {
+      const mesh = new Mesh(new BoxGeometry(Math.max(0.05, going - 0.01), Math.max(0.04, rise - 0.01), width), stepMat);
+      mesh.position.set(going * (i + 0.5), -rise * (i + 0.5), 0);
+      mesh.castShadow = true;
+      g.add(mesh);
+    }
+    house.add(g);
+  }
+  function addStumps(stumps) {
+    const rows = /* @__PURE__ */ new Map();
+    for (const s of stumps) {
+      const drop = s.height || 0.45;
+      const post = new Mesh(new BoxGeometry(s.size || 0.15, drop, s.size || 0.15), stumpMat);
+      post.position.set(s.x, -drop / 2, s.z);
+      post.castShadow = true;
+      post.userData.stumpId = s.id;
+      house.add(post);
+      const k = s.z.toFixed(3);
+      if (!rows.has(k)) rows.set(k, []);
+      rows.get(k).push(s);
+    }
+    for (const row of rows.values()) {
+      if (row.length < 2) continue;
+      row.sort((a, b) => a.x - b.x);
+      const span = row[row.length - 1].x - row[0].x;
+      if (span < 0.2) continue;
+      const beam = new Mesh(new BoxGeometry(span, 0.09, 0.07), bearerMat);
+      beam.position.set((row[0].x + row[row.length - 1].x) / 2, -0.05, row[0].z);
+      house.add(beam);
+    }
+  }
+  function planBox(plan) {
+    return sceneBounds(plan.walls, elementPoints(plan));
+  }
   function rebuild(plan) {
     clearHouse();
-    const b = bounds(plan.walls);
+    const stumps = plan.stumps || [];
+    const drop = stumps.length ? Math.max(...stumps.map((s) => s.height || 0.45)) : 0;
+    ground.position.y = -drop - 0.02;
+    const b = planBox(plan);
     addGrid(b);
+    if (stumps.length) addStumps(stumps);
+    for (const deck of plan.decks || []) addDeck(deck, drop);
+    for (const step of plan.steps || []) addSteps(step);
     const selWall = plan.selection?.kind === "wall" ? plan.selection.id : null;
     const selRoom = plan.selection?.kind === "room" ? plan.selection.id : selectedRoomId;
     for (const w of plan.walls) {
@@ -36511,7 +36960,7 @@ function createView3D(canvas) {
     }
   }
   function fit(plan) {
-    const b = bounds(plan.walls);
+    const b = planBox(plan);
     if (!b) {
       camera.position.set(12, 14, 16);
       controls.target.set(6, 0, 6);
@@ -36525,7 +36974,7 @@ function createView3D(canvas) {
     controls.update();
   }
   function topView(plan) {
-    const b = bounds(plan.walls);
+    const b = planBox(plan);
     const cx = b ? (b.minX + b.maxX) / 2 : 6;
     const cz = b ? (b.minZ + b.maxZ) / 2 : 6;
     const span = b ? Math.max(b.w, b.h, 8) : 12;
@@ -36539,7 +36988,7 @@ function createView3D(canvas) {
     renderer.render(scene, camera);
     raf = requestAnimationFrame(tick);
   }
-  function pickHit(e) {
+  function pickHit2(e) {
     const rect2 = canvas.getBoundingClientRect();
     if (!rect2.width || !rect2.height) return null;
     pointer.x = (e.clientX - rect2.left) / rect2.width * 2 - 1;
@@ -36577,7 +37026,7 @@ function createView3D(canvas) {
     rightActive = false;
     rightDrag = false;
     if (dragged || !onContext) return;
-    const hit = pickHit(e);
+    const hit = pickHit2(e);
     if (hit) onContext(hit, e.clientX, e.clientY);
   });
   canvas.addEventListener("pointerdown", (e) => {
@@ -36594,12 +37043,13 @@ function createView3D(canvas) {
     else if (o?.userData.roomId && onRoomClick) onRoomClick(o.userData.roomId);
   });
   const ro = new ResizeObserver(resize);
-  ro.observe(canvas);
+  ro.observe(canvas.parentElement || canvas);
   resize();
   tick();
   return {
     rebuild,
     fit,
+    resize,
     topView,
     setOnRoomClick(fn) {
       onRoomClick = fn;
@@ -36639,6 +37089,7 @@ var init_view3d = __esm({
     init_OrbitControls();
     init_GLTFExporter();
     init_constants();
+    init_elements();
     init_geom();
     init_furniture();
   }
@@ -36646,7 +37097,582 @@ var init_view3d = __esm({
 
 // js/app.js
 init_constants();
+
+// js/commands.js
+init_constants();
+init_elements();
+init_furniture();
 init_geom();
+
+// js/pick.js
+init_furniture();
+init_geom();
+init_elements();
+function selectedObj(state) {
+  const sel = state.selection;
+  if (!sel) return null;
+  if (sel.kind === "furniture") return state.furniture.find((f) => f.id === sel.id) || null;
+  if (sel.kind === "wall") return state.walls.find((w) => w.id === sel.id) || null;
+  if (sel.kind === "opening") return state.openings.find((o) => o.id === sel.id) || null;
+  if (sel.kind === "room") return state.rooms.find((r) => r.id === sel.id) || null;
+  if (sel.kind === "deck") return (state.decks || []).find((d) => d.id === sel.id) || null;
+  if (sel.kind === "steps") return (state.steps || []).find((s) => s.id === sel.id) || null;
+  if (sel.kind === "stump") return (state.stumps || []).find((s) => s.id === sel.id) || null;
+  return null;
+}
+function objectBy(state, kind, id) {
+  if (kind === "furniture") return state.furniture.find((f) => f.id === id) || null;
+  if (kind === "wall") return state.walls.find((w) => w.id === id) || null;
+  if (kind === "opening") return state.openings.find((o) => o.id === id) || null;
+  if (kind === "room") return state.rooms.find((r) => r.id === id) || null;
+  if (kind === "deck") return (state.decks || []).find((d) => d.id === id) || null;
+  if (kind === "steps") return (state.steps || []).find((s) => s.id === id) || null;
+  if (kind === "stump") return (state.stumps || []).find((s) => s.id === id) || null;
+  return null;
+}
+function pickHit(state, world, screen, view) {
+  const coarse = !!view?.coarse;
+  const handleR = coarse ? 22 : 10;
+  const furnPad = coarse ? 0.18 : 0.06;
+  const wallTol = coarse ? 0.45 : 0.28;
+  const openTol = coarse ? 0.4 : 0.25;
+  const o = { x: (view?.width || 1) / 2, y: (view?.height || 1) / 2 };
+  if (state.selection?.kind === "wall") {
+    const wall = state.walls.find((w) => w.id === state.selection.id);
+    if (wall) {
+      for (const which of ["a", "b"]) {
+        const p = wall[which];
+        const sx = o.x + (p[0] - state.camera2d.x) * state.camera2d.zoom;
+        const sy = o.y - (p[1] - state.camera2d.z) * state.camera2d.zoom;
+        if (Math.hypot(sx - screen.x, sy - screen.y) <= handleR) return { kind: "handle", wallId: wall.id, which };
+      }
+    }
+  }
+  for (const f of state.furniture) {
+    if (containsPoint(f, world, furnPad)) return { kind: "furniture", id: f.id };
+  }
+  for (const op of state.openings) {
+    const wall = state.walls.find((w) => w.id === op.wallId);
+    if (!wall) continue;
+    const L = wallLen(wall);
+    const a = [
+      wall.a[0] + (wall.b[0] - wall.a[0]) * (op.t - op.width / 2 / L),
+      wall.a[1] + (wall.b[1] - wall.a[1]) * (op.t - op.width / 2 / L)
+    ];
+    const b = [
+      wall.a[0] + (wall.b[0] - wall.a[0]) * (op.t + op.width / 2 / L),
+      wall.a[1] + (wall.b[1] - wall.a[1]) * (op.t + op.width / 2 / L)
+    ];
+    const dx = b[0] - a[0];
+    const dz = b[1] - a[1];
+    const l2 = dx * dx + dz * dz || 1;
+    const t = Math.max(0, Math.min(1, ((world[0] - a[0]) * dx + (world[1] - a[1]) * dz) / l2));
+    const q = [a[0] + dx * t, a[1] + dz * t];
+    if (Math.hypot(world[0] - q[0], world[1] - q[1]) < openTol) return { kind: "opening", id: op.id };
+  }
+  for (const s of state.stumps || []) {
+    const r = Math.max(0.12, (s.size || 0.15) / 2) + (coarse ? 0.12 : 0.04);
+    if (Math.hypot(world[0] - s.x, world[1] - s.z) <= r) return { kind: "stump", id: s.id };
+  }
+  for (const step of state.steps || []) {
+    if (pointInStep(world, step)) return { kind: "steps", id: step.id };
+  }
+  const nw = nearestWall(world, state.walls, wallTol);
+  if (nw) return { kind: "wall", id: nw.wall.id };
+  for (const d of state.decks || []) {
+    if (pointInDeck(world, d)) return { kind: "deck", id: d.id };
+  }
+  const room = state.rooms.find((r) => pointInPoly(world, r.points));
+  if (room) return { kind: "room", id: room.id };
+  return null;
+}
+
+// js/commands.js
+function createCommands(state, api) {
+  function edit(fn) {
+    api.checkpoint();
+    const ok = fn();
+    if (ok === false) {
+      state.past.pop();
+      api.render();
+      return;
+    }
+    api.commit();
+  }
+  function addFurniture(ghost) {
+    const spec = FURN[ghost.type];
+    state.furniture.push({
+      id: uid("f"),
+      type: ghost.type,
+      x: ghost.x,
+      z: ghost.z,
+      rot: ghost.rot || 0,
+      w: ghost.w || spec?.w || 0.45,
+      d: ghost.d || spec?.d || 0.45,
+      auto: false,
+      hidden: false
+    });
+    state.selection = { kind: "furniture", id: state.furniture.at(-1).id };
+  }
+  function removeFurniture(id) {
+    const f = state.furniture.find((x) => x.id === id);
+    if (!f) return;
+    if (f.type === "plant" && f.auto) f.hidden = true;
+    else state.furniture = state.furniture.filter((x) => x.id !== id);
+    if (state.selection?.kind === "furniture" && state.selection.id === id) state.selection = null;
+  }
+  function addWall(a, b) {
+    if (dist(a, b) < 0.2) return;
+    const oldWalls = state.walls;
+    state.walls = planarize(mergeCollinear([...state.walls, { id: uid("w"), a: [...a], b: [...b] }], state.pins || []));
+    state.openings = rebindOpenings(state.openings, oldWalls, state.walls);
+    api.refreshRooms();
+    ensurePlants(state);
+  }
+  function placeOpening(world, type) {
+    const hit = nearestWall(world, state.walls, 0.45);
+    if (!hit) return;
+    const width = type === "door" ? DOOR_W : WIN_W;
+    if (!openingFits(hit.wall, hit.t, Math.min(width, wallLen(hit.wall) - 0.2))) return;
+    const w = Math.min(width, wallLen(hit.wall) - 0.2);
+    api.checkpoint();
+    state.openings.push({
+      id: uid(type === "door" ? "d" : "win"),
+      type,
+      wallId: hit.wall.id,
+      t: clampOpening(hit.wall, hit.t, w),
+      width: w,
+      height: type === "door" ? DOOR_H : WIN_H,
+      sill: type === "door" ? 0 : WIN_SILL
+    });
+    state.selection = { kind: "opening", id: state.openings.at(-1).id };
+    api.commit();
+  }
+  function deleteHit(hit) {
+    if (!hit) return;
+    if (hit.kind === "furniture") {
+      api.checkpoint();
+      removeFurniture(hit.id);
+      api.commit();
+      return;
+    }
+    if (hit.kind === "opening") {
+      api.checkpoint();
+      state.openings = state.openings.filter((o) => o.id !== hit.id);
+      api.commit();
+      return;
+    }
+    if (hit.kind === "wall") {
+      api.checkpoint();
+      state.openings = state.openings.filter((o) => o.wallId !== hit.id);
+      state.walls = state.walls.filter((w) => w.id !== hit.id);
+      api.refreshRooms();
+      api.commit();
+      return;
+    }
+    if (hit.kind === "deck" || hit.kind === "steps" || hit.kind === "stump") {
+      api.checkpoint();
+      removeSite(hit.kind, hit.id);
+      api.commit();
+    }
+  }
+  function removeSite(kind, id) {
+    if (kind === "deck") state.decks = state.decks.filter((d) => d.id !== id);
+    if (kind === "steps") state.steps = state.steps.filter((d) => d.id !== id);
+    if (kind === "stump") state.stumps = state.stumps.filter((d) => d.id !== id);
+    if (state.selection?.kind === kind && state.selection.id === id) state.selection = null;
+  }
+  function placeDeck(draft) {
+    const d = normalizeDeck(draft);
+    if (d.w < 0.4 || d.d < 0.4) return false;
+    state.decks.push({
+      id: uid("deck"),
+      kind: draft.kind === "veranda" ? "veranda" : "deck",
+      name: draft.name || (draft.kind === "veranda" ? "Veranda" : "Deck"),
+      x: d.x,
+      z: d.z,
+      w: d.w,
+      d: d.d
+    });
+    state.selection = { kind: "deck", id: state.decks.at(-1).id };
+    return true;
+  }
+  function placeSteps(world, rot = Math.PI / 2) {
+    const g = state.alt ? SNAP_FINE : state.snap;
+    const p = snapPt(world, g);
+    state.steps.push({
+      id: uid("steps"),
+      x: p[0],
+      z: p[1],
+      rot,
+      width: 1.2,
+      count: 3,
+      rise: 0.15,
+      going: 0.28
+    });
+    state.selection = { kind: "steps", id: state.steps.at(-1).id };
+  }
+  function placeStump(world) {
+    const g = state.alt ? SNAP_FINE : state.snap;
+    const p = snapPt(world, g);
+    if ((state.stumps || []).some((s) => Math.hypot(s.x - p[0], s.z - p[1]) < 0.2)) return false;
+    state.stumps.push({ id: uid("stump"), x: p[0], z: p[1], size: STUMP_SIZE, height: STUMP_HEIGHT });
+    state.selection = { kind: "stump", id: state.stumps.at(-1).id };
+    return true;
+  }
+  function fillStumps() {
+    const b = bounds(state.walls);
+    if (!b) {
+      api.flash("Draw the house before the stump grid");
+      return false;
+    }
+    const grid = stumpGrid(b);
+    const have = new Set((state.stumps || []).map((s) => `${s.x.toFixed(3)},${s.z.toFixed(3)}`));
+    let added = 0;
+    for (const s of grid) {
+      const k = `${s.x.toFixed(3)},${s.z.toFixed(3)}`;
+      if (have.has(k)) continue;
+      state.stumps.push(s);
+      added += 1;
+    }
+    if (!added) {
+      api.flash("Stump grid already filled");
+      return false;
+    }
+    return true;
+  }
+  function refitOpenings(wall) {
+    const L = wallLen(wall);
+    for (const op of state.openings) {
+      if (op.wallId !== wall.id) continue;
+      op.width = Math.min(op.width, Math.max(0.35, L - 0.2));
+      op.t = clampOpening(wall, op.t, op.width);
+    }
+  }
+  function setWallLength(wall, len) {
+    const L = wallLen(wall);
+    if (!(L > 1e-6)) return;
+    len = clamp(len, 0.4, 40);
+    const dx = (wall.b[0] - wall.a[0]) / L;
+    const dz = (wall.b[1] - wall.a[1]) / L;
+    const nb = [wall.a[0] + dx * len, wall.a[1] + dz * len];
+    const oldB = [...wall.b];
+    const delta = [nb[0] - oldB[0], nb[1] - oldB[1]];
+    if (Math.hypot(delta[0], delta[1]) < 1e-6) return;
+    const hits = [];
+    for (const w of state.walls) {
+      for (const which of ["a", "b"]) {
+        if (dist(w[which], oldB) < 1e-3) hits.push([w, which]);
+      }
+    }
+    const moved = [oldB[0] + delta[0], oldB[1] + delta[1]];
+    for (const [w, which] of hits) w[which] = [...moved];
+    state.pins = (state.pins || []).map((p) => dist(p, oldB) < 1e-3 ? [...moved] : p);
+    for (const w of state.walls) refitOpenings(w);
+    api.refreshRooms();
+  }
+  function duplicateFurn(f) {
+    const copy = cloneFurn(f);
+    copy.id = uid("f");
+    copy.auto = false;
+    copy.locked = false;
+    let placed = false;
+    for (const [dx, dz] of [
+      [0.4, 0.4],
+      [0.45, 0],
+      [0, 0.45],
+      [-0.4, 0.3]
+    ]) {
+      const x = f.x + dx;
+      const z = f.z + dz;
+      if (f.type === "tank") {
+        const s = snapTank([x, z], state);
+        if (!s.valid) continue;
+        copy.x = s.x;
+        copy.z = s.z;
+        copy.rot = s.rot;
+        copy.w = s.w;
+        copy.d = s.d;
+        placed = true;
+        break;
+      }
+      if (state.rooms.some((r) => pointInPoly([x, z], r.points))) {
+        copy.x = x;
+        copy.z = z;
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      copy.x = f.x + 0.4;
+      copy.z = f.z + 0.4;
+    }
+    state.furniture.push(copy);
+    state.selection = { kind: "furniture", id: copy.id };
+  }
+  function changeFurnType(f, type) {
+    if (!type || type === f.type || !FURN[type]) return false;
+    if (type === "tank") {
+      const s = snapTank([f.x, f.z], state);
+      if (!s.valid) {
+        api.flash(s.reason === "door" ? "Doorway is in the way" : "Needs a clear wall");
+        return false;
+      }
+      f.type = "tank";
+      f.x = s.x;
+      f.z = s.z;
+      f.rot = s.rot;
+      f.w = s.w;
+      f.d = s.d;
+      f.auto = false;
+      return true;
+    }
+    const spec = FURN[type];
+    f.type = type;
+    f.w = spec.w;
+    f.d = spec.d;
+    f.auto = false;
+    if (type === "plant") f.rot = 0;
+    return true;
+  }
+  function splitWall(wall, t) {
+    t = clamp(t, 0.08, 0.92);
+    const p = [wall.a[0] + (wall.b[0] - wall.a[0]) * t, wall.a[1] + (wall.b[1] - wall.a[1]) * t];
+    const L = wallLen(wall);
+    const w1 = { id: wall.id, a: [...wall.a], b: [...p] };
+    const w2 = { id: uid("w"), a: [...p], b: [...wall.b] };
+    for (const op of state.openings) {
+      if (op.wallId !== wall.id) continue;
+      const along = op.t * L;
+      const host = along <= t * L ? w1 : w2;
+      const local = host === w1 ? along : along - t * L;
+      const hostL = Math.max(wallLen(host), 1e-6);
+      op.wallId = host.id;
+      op.width = Math.min(op.width, Math.max(0.35, hostL * 0.72));
+      op.t = clampOpening(host, local / hostL, op.width);
+    }
+    const i = state.walls.findIndex((w) => w.id === wall.id);
+    state.walls.splice(i, 1, w1, w2);
+    state.pins = state.pins || [];
+    state.pins.push(p);
+    state.selection = { kind: "wall", id: w1.id };
+  }
+  function addOpeningOn(wall, type) {
+    const L = wallLen(wall);
+    const want = type === "door" ? DOOR_W : WIN_W;
+    if (L < want + 0.2) {
+      api.flash("Wall is too short");
+      return false;
+    }
+    const width = Math.min(want, L - 0.2);
+    const op = {
+      id: uid(type === "door" ? "d" : "win"),
+      type,
+      wallId: wall.id,
+      width,
+      t: clampOpening(wall, 0.5, width),
+      height: type === "door" ? DOOR_H : WIN_H,
+      sill: type === "door" ? 0 : WIN_SILL
+    };
+    state.openings.push(op);
+    state.selection = { kind: "opening", id: op.id };
+    return true;
+  }
+  function splitParam(wall) {
+    if (!state.menuAt) return null;
+    const pr = projectOnSeg(state.menuAt, wall.a, wall.b);
+    if (pr.dist > 0.45 || pr.t < 0.12 || pr.t > 0.88) return null;
+    return pr.t;
+  }
+  function runFurn(f, act, ds) {
+    if (act === "nudge") {
+      const dx = Number(ds.x || 0) * 0.1;
+      const dz = Number(ds.z || 0) * 0.1;
+      edit(() => {
+        if (f.type === "tank") {
+          const s = snapTank([f.x + dx, f.z + dz], state);
+          if (!s.valid) {
+            api.flash(s.reason === "door" ? "Doorway is in the way" : "Needs a clear wall");
+            return false;
+          }
+          f.x = s.x;
+          f.z = s.z;
+          f.rot = s.rot;
+          return;
+        }
+        f.x += dx;
+        f.z += dz;
+      });
+      return;
+    }
+    edit(() => {
+      if (act === "rot90") f.rot = (f.rot || 0) + Math.PI / 2;
+      else if (act === "rot45") f.rot = (f.rot || 0) + Math.PI / 4;
+      else if (act === "turn") f.rot = (f.rot || 0) + Math.PI;
+      else if (act === "mirror") f.rot = -(f.rot || 0);
+      else if (act === "swap") {
+        const w = f.w;
+        f.w = f.d;
+        f.d = w;
+      } else if (act === "align") {
+        const hit = nearestWall([f.x, f.z], state.walls, 4);
+        if (!hit) {
+          api.flash("No wall nearby");
+          return false;
+        }
+        f.rot = Math.atan2(hit.wall.b[1] - hit.wall.a[1], hit.wall.b[0] - hit.wall.a[0]);
+      } else if (act === "realign") {
+        const s = snapTank([f.x, f.z], state);
+        if (!s.valid) {
+          api.flash(s.reason === "door" ? "Doorway is in the way" : "Needs a clear wall");
+          return false;
+        }
+        f.x = s.x;
+        f.z = s.z;
+        f.rot = s.rot;
+        f.w = s.w;
+        f.d = s.d;
+      } else if (act === "dup") duplicateFurn(f);
+      else if (act === "center") {
+        const room = state.rooms.find((r) => pointInPoly([f.x, f.z], r.points));
+        if (!room) {
+          api.flash("Not inside a room");
+          return false;
+        }
+        f.x = room.centroid[0];
+        f.z = room.centroid[1];
+      } else if (act === "reset") {
+        const spec = FURN[f.type];
+        if (!spec) return false;
+        f.w = spec.w;
+        f.d = spec.d;
+      } else if (act === "lock") f.locked = !f.locked;
+      else if (act === "hide") {
+        f.hidden = true;
+        state.selection = null;
+      } else if (act === "retype") return changeFurnType(f, ds.type);
+      else if (act === "del") removeFurniture(f.id);
+      else return false;
+    });
+  }
+  function runWall(wall, act) {
+    edit(() => {
+      if (act === "split-half") splitWall(wall, 0.5);
+      else if (act === "split-here") {
+        const t = splitParam(wall);
+        if (t == null) return false;
+        splitWall(wall, t);
+      } else if (act === "straighten") {
+        const aligned = axisAlign(wall.a, wall.b);
+        if (dist(aligned, wall.b) < 1e-4) {
+          api.flash("Already straight");
+          return false;
+        }
+        wall.b = [...aligned];
+        refitOpenings(wall);
+      } else if (act === "add-door") return addOpeningOn(wall, "door");
+      else if (act === "add-window") return addOpeningOn(wall, "window");
+      else if (act === "del") {
+        state.openings = state.openings.filter((o) => o.wallId !== wall.id);
+        state.walls = state.walls.filter((w) => w.id !== wall.id);
+        state.selection = null;
+      } else return false;
+    });
+  }
+  function runOpening(op, act) {
+    const wall = state.walls.find((w) => w.id === op.wallId);
+    if (!wall) return;
+    edit(() => {
+      if (act === "center-op") op.t = clampOpening(wall, 0.5, op.width);
+      else if (act === "widen") {
+        op.width = Math.max(0.4, wallLen(wall) - 0.24);
+        op.t = clampOpening(wall, 0.5, op.width);
+      } else if (act === "to-window") {
+        op.type = "window";
+        op.height = WIN_H;
+        op.sill = WIN_SILL;
+        op.width = Math.min(Math.max(op.width, 0.6), Math.max(0.5, wallLen(wall) - 0.2));
+        op.t = clampOpening(wall, op.t, op.width);
+      } else if (act === "to-door") {
+        op.type = "door";
+        op.height = DOOR_H;
+        op.sill = 0;
+        op.width = Math.min(DOOR_W, Math.max(0.5, wallLen(wall) - 0.2));
+        op.t = clampOpening(wall, op.t, op.width);
+      } else if (act === "del") {
+        state.openings = state.openings.filter((o) => o.id !== op.id);
+        state.selection = null;
+      } else return false;
+    });
+  }
+  function runRoom(room, act) {
+    if (act === "rename") {
+      state.focusField = "name";
+      api.markInspectorDirty();
+      api.render();
+      return;
+    }
+    const plants = state.furniture.filter((f) => f.type === "plant" && pointInPoly([f.x, f.z], room.points));
+    if (!plants.length) {
+      api.flash("No plants in this room");
+      return;
+    }
+    edit(() => {
+      if (act === "plants-hide") plants.forEach((f) => f.hidden = true);
+      else if (act === "plants-show") plants.forEach((f) => f.hidden = false);
+      else return false;
+    });
+  }
+  function runSite(obj, act) {
+    edit(() => {
+      if (act === "del") {
+        removeSite(state.selection.kind, obj.id);
+        return;
+      }
+      if (act === "veranda" && state.selection.kind === "deck") {
+        obj.kind = obj.kind === "veranda" ? "deck" : "veranda";
+        if (!obj.name || obj.name === "Deck" || obj.name === "Veranda") obj.name = obj.kind === "veranda" ? "Veranda" : "Deck";
+        return;
+      }
+      if (act === "rot90" && state.selection.kind === "steps") {
+        obj.rot = (obj.rot || 0) + Math.PI / 2;
+        return;
+      }
+      return false;
+    });
+  }
+  function runAction(act, ds) {
+    const sel = state.selection;
+    const obj = objectBy(state, sel?.kind, sel?.id);
+    if (!sel || !obj) return;
+    if (sel.kind === "furniture") runFurn(obj, act, ds);
+    else if (sel.kind === "wall") runWall(obj, act);
+    else if (sel.kind === "opening") runOpening(obj, act);
+    else if (sel.kind === "room") runRoom(obj, act);
+    else if (sel.kind === "deck" || sel.kind === "steps" || sel.kind === "stump") runSite(obj, act);
+  }
+  return {
+    edit,
+    addFurniture,
+    removeFurniture,
+    addWall,
+    placeOpening,
+    deleteHit,
+    placeDeck,
+    placeSteps,
+    placeStump,
+    fillStumps,
+    setWallLength,
+    refitOpenings,
+    splitParam,
+    runAction,
+    placeFurniture
+  };
+}
+
+// js/app.js
+init_elements();
+init_furniture();
 
 // js/generate.js
 init_constants();
@@ -36939,10 +37965,707 @@ function twoBedPlan() {
   ]);
 }
 
-// js/plan2d.js
+// js/app.js
+init_geom();
+
+// js/export-sheet.js
+init_constants();
+init_elements();
+init_geom();
+var PAPER = { w: 420, h: 297 };
+function round(n) {
+  return Math.round(n * 1e3) / 1e3;
+}
+function planEntities(state) {
+  const entities = [];
+  const line = (layer, a, b) => entities.push({ kind: "line", layer, a: [...a], b: [...b] });
+  const poly = (layer, pts) => entities.push({ kind: "poly", layer, pts: pts.map((p) => [...p]) });
+  const text = (layer, at, value, h = 0.18) => entities.push({ kind: "text", layer, at: [...at], text: String(value), h });
+  for (const d of state.decks || []) {
+    const c = deckCorners(d);
+    poly(d.kind === "veranda" ? "VERANDA" : "DECK", c);
+    const r = normalizeDeck(d);
+    text("LABELS", [r.x + r.w / 2, r.z + r.d / 2], d.name || (d.kind === "veranda" ? "Veranda" : "Deck"), 0.22);
+  }
+  for (const s of state.steps || []) {
+    const c = stepCorners(s);
+    poly("STEPS", c);
+    const ang = s.rot || 0;
+    const len = (s.count || 1) * (s.going || 0.28);
+    for (let i = 1; i < (s.count || 1); i++) {
+      const t = i * (s.going || 0.28) / len;
+      const along = [c[0][0] + (c[3][0] - c[0][0]) * (i / s.count), c[0][1] + (c[3][1] - c[0][1]) * (i / s.count)];
+      const along2 = [c[1][0] + (c[2][0] - c[1][0]) * (i / s.count), c[1][1] + (c[2][1] - c[1][1]) * (i / s.count)];
+      void t;
+      void ang;
+      line("STEPS", along, along2);
+    }
+  }
+  for (const s of state.stumps || []) {
+    const h = (s.size || 0.15) / 2;
+    poly("STUMPS", [
+      [s.x - h, s.z - h],
+      [s.x + h, s.z - h],
+      [s.x + h, s.z + h],
+      [s.x - h, s.z + h]
+    ]);
+  }
+  for (const w of state.walls || []) line("WALLS", w.a, w.b);
+  for (const op of state.openings || []) {
+    const wall = state.walls.find((w) => w.id === op.wallId);
+    if (!wall) continue;
+    const L = wallLen(wall) || 1;
+    const t0 = op.t - op.width / 2 / L;
+    const t1 = op.t + op.width / 2 / L;
+    const p0 = [wall.a[0] + (wall.b[0] - wall.a[0]) * t0, wall.a[1] + (wall.b[1] - wall.a[1]) * t0];
+    const p1 = [wall.a[0] + (wall.b[0] - wall.a[0]) * t1, wall.a[1] + (wall.b[1] - wall.a[1]) * t1];
+    line("GAPS", p0, p1);
+    if (op.type === "door" && op.width <= 1.25) {
+      const mx = (p0[0] + p1[0]) / 2;
+      const mz = (p0[1] + p1[1]) / 2;
+      const ang = Math.atan2(wall.b[1] - wall.a[1], wall.b[0] - wall.a[0]);
+      let nx = -Math.sin(ang);
+      let nz = Math.cos(ang);
+      const inside = (state.rooms || []).some((r) => pointInPoly([mx + nx * 0.35, mz + nz * 0.35], r.points));
+      if (!inside) {
+        nx = -nx;
+        nz = -nz;
+      }
+      const hinge = p0;
+      const closed = Math.atan2(p1[1] - hinge[1], p1[0] - hinge[0]);
+      let delta = Math.atan2(nz, nx) - closed;
+      while (delta > Math.PI) delta -= Math.PI * 2;
+      while (delta < -Math.PI) delta += Math.PI * 2;
+      const stepsN = 6;
+      let prev = p1;
+      for (let i = 1; i <= stepsN; i++) {
+        const a = closed + delta * (i / stepsN);
+        const q = [hinge[0] + Math.cos(a) * op.width, hinge[1] + Math.sin(a) * op.width];
+        line("OPENINGS", prev, q);
+        prev = q;
+      }
+      line("OPENINGS", hinge, prev);
+    }
+  }
+  for (const room of state.rooms || []) {
+    text("ROOMS", room.centroid, room.name, 0.22);
+    text("ROOMS", [room.centroid[0], room.centroid[1] - 0.28], fmtArea(internalArea(room)), 0.16);
+  }
+  const mode = state.dimMode || "centreline";
+  const box = dimensionBox(state.walls, mode);
+  if (box && box.w > 0.2) {
+    const gap = 0.45;
+    const z = box.minZ - gap;
+    line("DIMS", [box.minX, box.minZ], [box.minX, z - 0.12]);
+    line("DIMS", [box.maxX, box.minZ], [box.maxX, z - 0.12]);
+    line("DIMS", [box.minX, z], [box.maxX, z]);
+    text("DIMS", [(box.minX + box.maxX) / 2, z - 0.28], fmt(box.w), 0.2);
+    const x = box.minX - gap;
+    line("DIMS", [box.minX, box.minZ], [x - 0.12, box.minZ]);
+    line("DIMS", [box.minX, box.maxZ], [x - 0.12, box.maxZ]);
+    line("DIMS", [x, box.minZ], [x, box.maxZ]);
+    text("DIMS", [x - 0.28, (box.minZ + box.maxZ) / 2], fmt(box.h), 0.2);
+  }
+  return entities;
+}
+function layoutSheet(state, opts = {}) {
+  const scale = opts.scale === 100 ? 100 : 50;
+  const date = opts.date || "";
+  const entities = planEntities(state);
+  const extra = [];
+  for (const e of entities) {
+    if (e.kind === "line") extra.push(e.a, e.b);
+    else if (e.kind === "poly") extra.push(...e.pts);
+    else if (e.kind === "text") extra.push(e.at);
+  }
+  const b = sceneBounds(state.walls, extra) || { minX: 0, minZ: 0, maxX: 10, maxZ: 8, w: 10, h: 8 };
+  const pad = 1.1;
+  const worldW = Math.max(b.w + pad * 2, 1);
+  const worldH = Math.max(b.h + pad * 2, 1);
+  const margin = 14;
+  const titleW = 86;
+  const titleH = 46;
+  const availW = PAPER.w - margin * 2 - titleW - 8;
+  const availH = PAPER.h - margin * 2;
+  const exact = 1e3 / scale;
+  const fit = Math.min(availW / worldW, availH / worldH);
+  const mmPerM = Math.min(exact, fit);
+  const usedScale = Math.max(1, Math.round(1e3 / mmPerM));
+  const drawW = worldW * mmPerM;
+  const drawH = worldH * mmPerM;
+  const originX = margin + (availW - drawW) / 2;
+  const originY = margin + (availH - drawH) / 2;
+  const minX = b.minX - pad;
+  const maxZ = b.maxZ + pad;
+  const map = (p) => [originX + (p[0] - minX) * mmPerM, originY + (maxZ - p[1]) * mmPerM];
+  const items = [];
+  const fill2 = (pts, color) => items.push({ op: "fill", pts, color });
+  const stroke = (pts, color, width, dash) => items.push({ op: "stroke", pts, color, width, close: false, dash });
+  const strokeClosed = (pts, color, width) => items.push({ op: "stroke", pts: [...pts, pts[0]], color, width });
+  const label = (x, y, text, size, anchor = "start", weight = 500) => items.push({ op: "text", x, y, text, size, anchor, color: "#1c1917", weight });
+  items.push({ op: "fill", pts: [[0, 0], [PAPER.w, 0], [PAPER.w, PAPER.h], [0, PAPER.h]], color: "#f7f4ec" });
+  stroke([[margin / 2, margin / 2], [PAPER.w - margin / 2, margin / 2], [PAPER.w - margin / 2, PAPER.h - margin / 2], [margin / 2, PAPER.h - margin / 2], [margin / 2, margin / 2]], "#d4cdc0", 0.3);
+  for (const e of entities) {
+    if (e.kind === "poly" && (e.layer === "DECK" || e.layer === "VERANDA")) {
+      const pts = e.pts.map(map);
+      fill2(pts, e.layer === "VERANDA" ? "#e4ebe6" : "#e7dcc8");
+      strokeClosed(pts, "#6b6459", 0.35);
+    }
+  }
+  for (const e of entities) {
+    if (e.kind === "poly" && e.layer === "STEPS") {
+      const pts = e.pts.map(map);
+      fill2(pts, "#efe6d6");
+      strokeClosed(pts, "#6b6459", 0.3);
+    } else if (e.kind === "line" && e.layer === "STEPS") {
+      stroke([map(e.a), map(e.b)], "#6b6459", 0.25);
+    }
+  }
+  for (const e of entities) {
+    if (e.kind === "poly" && e.layer === "STUMPS") {
+      const pts = e.pts.map(map);
+      fill2(pts, "#6b6459");
+    }
+  }
+  for (const e of entities) {
+    if (e.kind === "line" && e.layer === "WALLS") {
+      stroke([map(e.a), map(e.b)], "#1c1917", Math.max(0.6, WALL_THICK * mmPerM));
+    }
+  }
+  for (const e of entities) {
+    if (e.kind === "line" && e.layer === "GAPS") {
+      stroke([map(e.a), map(e.b)], "#f7f4ec", Math.max(0.8, WALL_THICK * mmPerM + 0.4));
+    }
+  }
+  for (const e of entities) {
+    if (e.kind === "line" && (e.layer === "OPENINGS" || e.layer === "GAPS")) {
+      stroke([map(e.a), map(e.b)], "#2f5d50", 0.35);
+    } else if (e.kind === "line" && e.layer === "DIMS") {
+      stroke([map(e.a), map(e.b)], "#6b6459", 0.25);
+    }
+  }
+  for (const e of entities) {
+    if (e.kind !== "text") continue;
+    const p = map(e.at);
+    const size = Math.max(2.2, e.h * mmPerM);
+    label(p[0], p[1], e.text, e.layer === "ROOMS" && e.h > 0.2 ? size : size, "middle", e.layer === "ROOMS" && e.h > 0.2 ? 600 : 400);
+  }
+  const nx = PAPER.w - margin - titleW / 2;
+  const ny = margin + 8;
+  items.push({
+    op: "fill",
+    pts: [
+      [nx, ny + 14],
+      [nx + 4, ny + 2],
+      [nx, ny + 5],
+      [nx - 4, ny + 2]
+    ],
+    color: "#1c1917"
+  });
+  label(nx, ny - 1, "N", 4, "middle", 600);
+  const tbx = PAPER.w - margin - titleW;
+  const tby = PAPER.h - margin - titleH;
+  stroke(
+    [
+      [tbx, tby],
+      [tbx + titleW, tby],
+      [tbx + titleW, tby + titleH],
+      [tbx, tby + titleH],
+      [tbx, tby]
+    ],
+    "#1c1917",
+    0.4
+  );
+  const gfa = state.walls?.length ? grossFloorArea(state.walls) : 0;
+  const mode = state.dimMode || "centreline";
+  const modeLabel = mode === "outside" ? "outside faces" : mode === "inside" ? "inside faces" : "centrelines";
+  const rows = [
+    [`Neeky Home Designer ${APP_VERSION_LABEL}`, 600],
+    [state.title || "Untitled plan", 500],
+    [`Scale 1:${usedScale}    metres`, 400],
+    [`Dimensions: ${modeLabel}`, 400],
+    [`GFA ${fmtArea(gfa)}`, 500],
+    [`Walls ${WALL_THICK.toFixed(2)} m × ${WALL_HEIGHT.toFixed(2)} m`, 400],
+    [date ? `Date ${date}` : "Offline sheet", 400]
+  ];
+  rows.forEach((row, i) => label(tbx + 3, tby + 6 + i * 5.6, row[0], 3.1, "start", row[1]));
+  return { w: PAPER.w, h: PAPER.h, scale: usedScale, items };
+}
+function escapeXml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function toSvg(model) {
+  const parts = [
+    `<?xml version="1.0" encoding="UTF-8"?>`,
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${model.w}mm" height="${model.h}mm" viewBox="0 0 ${model.w} ${model.h}">`
+  ];
+  for (const item of model.items) {
+    if (item.op === "fill" || item.op === "stroke") {
+      const d = item.pts.map((p, i) => `${i ? "L" : "M"}${round(p[0])} ${round(p[1])}`).join(" ") + (item.op === "fill" || item.close ? " Z" : "");
+      if (item.op === "fill") parts.push(`<path d="${d}" fill="${item.color}"/>`);
+      else {
+        const dash = item.dash ? ` stroke-dasharray="${item.dash.join(" ")}"` : "";
+        parts.push(
+          `<path d="${d}" fill="none" stroke="${item.color}" stroke-width="${item.width}" stroke-linecap="butt" stroke-linejoin="miter"${dash}/>`
+        );
+      }
+    } else if (item.op === "text") {
+      const anchor = item.anchor === "middle" ? "middle" : item.anchor === "end" ? "end" : "start";
+      parts.push(
+        `<text x="${round(item.x)}" y="${round(item.y)}" fill="${item.color || "#1c1917"}" font-family="IBM Plex Sans, Helvetica, Arial, sans-serif" font-size="${item.size}" font-weight="${item.weight || 500}" text-anchor="${anchor}" dominant-baseline="middle">${escapeXml(item.text)}</text>`
+      );
+    }
+  }
+  parts.push(`</svg>`);
+  return parts.join("\n");
+}
+function ascii(s) {
+  return String(s).replace(/²/g, "2").replace(/×/g, "x").replace(/[^\x20-\x7e]/g, "");
+}
+function pdfEscape(s) {
+  return ascii(s).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+}
+function rgb(hex) {
+  const n = String(hex || "#1c1917").replace("#", "");
+  const r = parseInt(n.slice(0, 2), 16) / 255;
+  const g = parseInt(n.slice(2, 4), 16) / 255;
+  const b = parseInt(n.slice(4, 6), 16) / 255;
+  return `${r.toFixed(3)} ${g.toFixed(3)} ${b.toFixed(3)}`;
+}
+function toPdf(model) {
+  const pt = (mm) => mm * 72 / 25.4;
+  const W = pt(model.w);
+  const H = pt(model.h);
+  const x = (mm) => pt(mm).toFixed(2);
+  const y = (mm) => (H - pt(mm)).toFixed(2);
+  const cmds = [];
+  for (const item of model.items) {
+    if (item.op === "fill" || item.op === "stroke") {
+      const pts = item.pts;
+      if (!pts?.length) continue;
+      cmds.push(`${x(pts[0][0])} ${y(pts[0][1])} m`);
+      for (let i = 1; i < pts.length; i++) cmds.push(`${x(pts[i][0])} ${y(pts[i][1])} l`);
+      if (item.op === "fill") {
+        cmds.push("h");
+        cmds.push(`${rgb(item.color)} rg`);
+        cmds.push("f");
+      } else {
+        cmds.push(`${rgb(item.color)} RG`);
+        cmds.push(`${pt(item.width || 0.3).toFixed(2)} w`);
+        cmds.push("S");
+      }
+    } else if (item.op === "text") {
+      const size = pt(item.size || 3);
+      let tx = pt(item.x);
+      const text = pdfEscape(item.text);
+      if (item.anchor === "middle") tx -= size * 0.27 * text.length;
+      else if (item.anchor === "end") tx -= size * 0.5 * text.length;
+      const ty = H - pt(item.y) - size * 0.35;
+      cmds.push("BT");
+      cmds.push(`/F1 ${size.toFixed(2)} Tf`);
+      cmds.push(`${rgb(item.color)} rg`);
+      cmds.push(`${tx.toFixed(2)} ${ty.toFixed(2)} Td`);
+      cmds.push(`(${text}) Tj`);
+      cmds.push("ET");
+    }
+  }
+  return buildPdf(W, H, cmds.join("\n"));
+}
+function buildPdf(w, h, stream) {
+  const body = stream;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Count 1 /Kids [3 0 R] >>",
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${w.toFixed(2)} ${h.toFixed(2)}] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>`,
+    `<< /Length ${body.length} >>
+stream
+${body}
+endstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
+  ];
+  let pdf = "%PDF-1.4\n";
+  const xref = [0];
+  objects.forEach((obj, i) => {
+    xref.push(pdf.length);
+    pdf += `${i + 1} 0 obj
+${obj}
+endobj
+`;
+  });
+  const start = pdf.length;
+  pdf += `xref
+0 ${objects.length + 1}
+`;
+  pdf += "0000000000 65535 f \n";
+  for (let i = 1; i < xref.length; i++) pdf += `${String(xref[i]).padStart(10, "0")} 00000 n 
+`;
+  pdf += `trailer << /Size ${objects.length + 1} /Root 1 0 R >>
+startxref
+${start}
+%%EOF`;
+  return pdf;
+}
+function dxfPair(code, value) {
+  return `${code}
+${value}
+`;
+}
+function toDxf(state) {
+  const entities = planEntities(state);
+  let out = "";
+  out += dxfPair(0, "SECTION");
+  out += dxfPair(2, "HEADER");
+  out += dxfPair(9, "$INSUNITS");
+  out += dxfPair(70, 6);
+  out += dxfPair(9, "$MEASUREMENT");
+  out += dxfPair(70, 1);
+  out += dxfPair(0, "ENDSEC");
+  out += dxfPair(0, "SECTION");
+  out += dxfPair(2, "ENTITIES");
+  const line = (layer, a, b) => {
+    out += dxfPair(0, "LINE");
+    out += dxfPair(8, layer);
+    out += dxfPair(10, round(a[0]));
+    out += dxfPair(20, round(a[1]));
+    out += dxfPair(30, 0);
+    out += dxfPair(11, round(b[0]));
+    out += dxfPair(21, round(b[1]));
+    out += dxfPair(31, 0);
+  };
+  for (const e of entities) {
+    if (e.kind === "line") line(e.layer, e.a, e.b);
+    else if (e.kind === "poly") {
+      const pts = e.pts;
+      for (let i = 0; i < pts.length; i++) line(e.layer, pts[i], pts[(i + 1) % pts.length]);
+    } else if (e.kind === "text") {
+      out += dxfPair(0, "TEXT");
+      out += dxfPair(8, e.layer);
+      out += dxfPair(10, round(e.at[0]));
+      out += dxfPair(20, round(e.at[1]));
+      out += dxfPair(30, 0);
+      out += dxfPair(40, round(e.h || 0.2));
+      out += dxfPair(1, ascii(e.text).slice(0, 80));
+    }
+  }
+  out += dxfPair(0, "ENDSEC");
+  out += dxfPair(0, "EOF");
+  return out;
+}
+
+// js/schema.js
 init_constants();
 init_geom();
+var PlanError = class extends Error {
+  constructor(message) {
+    super(Array.isArray(message) ? message.join(" ") : message);
+    this.name = "PlanError";
+  }
+};
+function finitePair(p) {
+  if (!Array.isArray(p) || p.length < 2) return null;
+  const x = Number(p[0]);
+  const z = Number(p[1]);
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
+  return [x, z];
+}
+function finiteNum(v, fallback = null) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+function migratePlan(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new PlanError("The file is not a plan object.");
+  }
+  let version = data.version == null ? 1 : data.version;
+  if (typeof version !== "number" || !Number.isInteger(version)) {
+    throw new PlanError("Plan version is not a whole number this app understands.");
+  }
+  if (version > SCHEMA_VERSION) {
+    throw new PlanError(
+      `This plan uses schema ${version}. Neeky ${SCHEMA_VERSION} can open plans up to schema ${SCHEMA_VERSION}.`
+    );
+  }
+  if (version < 1) throw new PlanError(`Plan schema ${version} is not a Neeky plan.`);
+  let cur = { ...data, version };
+  while (cur.version < SCHEMA_VERSION) {
+    if (cur.version === 1) cur = migrateV1(cur);
+    else throw new PlanError(`No migration from schema ${cur.version}.`);
+  }
+  return cur;
+}
+function migrateV1(data) {
+  return {
+    ...data,
+    version: 2,
+    title: typeof data.title === "string" ? data.title : "",
+    dimMode: DIM_MODES.includes(data.dimMode) ? data.dimMode : "centreline",
+    decks: Array.isArray(data.decks) ? data.decks : [],
+    steps: Array.isArray(data.steps) ? data.steps : [],
+    stumps: Array.isArray(data.stumps) ? data.stumps : []
+  };
+}
+function validatePlan(data) {
+  const errors = [];
+  if (!data || typeof data !== "object") return ["The file is not a plan object."];
+  if (data.app !== APP) errors.push("Not a Neeky plan file.");
+  if (data.version !== SCHEMA_VERSION) errors.push(`Expected schema ${SCHEMA_VERSION}.`);
+  if (data.dimMode != null && !DIM_MODES.includes(data.dimMode)) {
+    errors.push("Dimension mode must be outside, inside, or centreline.");
+  }
+  const walls = data.walls;
+  if (walls != null && !Array.isArray(walls)) errors.push("Walls must be a list.");
+  (Array.isArray(walls) ? walls : []).forEach((w, i) => {
+    if (!w || !finitePair(w.a) || !finitePair(w.b)) {
+      errors.push(`Wall ${i + 1} has a coordinate that is not a finite number.`);
+    }
+  });
+  const wallCount = Array.isArray(walls) ? walls.length : 0;
+  (Array.isArray(data.openings) ? data.openings : []).forEach((o, i) => {
+    if (!o || typeof o !== "object") {
+      errors.push(`Opening ${i + 1} is not an object.`);
+      return;
+    }
+    const idx = Number(o.wallIndex);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= wallCount) {
+      errors.push(`Opening ${i + 1} does not sit on a wall.`);
+    }
+    for (const key of ["t", "width", "height"]) {
+      if (!Number.isFinite(Number(o[key]))) errors.push(`Opening ${i + 1} has a ${key} that is not a finite number.`);
+    }
+    if (o.sill != null && !Number.isFinite(Number(o.sill))) errors.push(`Opening ${i + 1} has a sill that is not a finite number.`);
+    if (o.type != null && o.type !== "door" && o.type !== "window") errors.push(`Opening ${i + 1} is not a door or a window.`);
+  });
+  (Array.isArray(data.rooms) ? data.rooms : []).forEach((r, i) => {
+    if (!r || !finitePair(r.labelAt)) errors.push(`Room label ${i + 1} has a coordinate that is not a finite number.`);
+  });
+  (Array.isArray(data.furniture) ? data.furniture : []).forEach((f, i) => {
+    if (!f || typeof f !== "object") {
+      errors.push(`Furniture ${i + 1} is not an object.`);
+      return;
+    }
+    if (!Number.isFinite(Number(f.x)) || !Number.isFinite(Number(f.z))) {
+      errors.push(`Furniture ${i + 1} has a coordinate that is not a finite number.`);
+    }
+    for (const key of ["rot", "w", "d"]) {
+      if (f[key] != null && !Number.isFinite(Number(f[key]))) {
+        errors.push(`Furniture ${i + 1} has a ${key} that is not a finite number.`);
+      }
+    }
+  });
+  (Array.isArray(data.pins) ? data.pins : []).forEach((p, i) => {
+    if (!finitePair(p)) errors.push(`Pin ${i + 1} has a coordinate that is not a finite number.`);
+  });
+  (Array.isArray(data.decks) ? data.decks : []).forEach((d, i) => {
+    if (!d || ["x", "z", "w", "d"].some((k) => !Number.isFinite(Number(d[k])))) {
+      errors.push(`Deck ${i + 1} has a size or position that is not a finite number.`);
+    } else if (d.kind != null && d.kind !== "deck" && d.kind !== "veranda") {
+      errors.push(`Deck ${i + 1} must be a deck or a veranda.`);
+    }
+  });
+  (Array.isArray(data.steps) ? data.steps : []).forEach((s, i) => {
+    if (!s || !Number.isFinite(Number(s.x)) || !Number.isFinite(Number(s.z))) {
+      errors.push(`Steps ${i + 1} have a coordinate that is not a finite number.`);
+      return;
+    }
+    const count = Number(s.count);
+    if (!Number.isInteger(count) || count < 1 || count > 24) errors.push(`Steps ${i + 1} need a riser count from 1 to 24.`);
+    for (const key of ["width", "rise", "going", "rot"]) {
+      if (s[key] != null && !Number.isFinite(Number(s[key]))) errors.push(`Steps ${i + 1} have a ${key} that is not a finite number.`);
+    }
+  });
+  (Array.isArray(data.stumps) ? data.stumps : []).forEach((s, i) => {
+    if (!s || !Number.isFinite(Number(s.x)) || !Number.isFinite(Number(s.z))) {
+      errors.push(`Stump ${i + 1} has a coordinate that is not a finite number.`);
+    }
+  });
+  if (data.walls != null && !Array.isArray(data.walls)) errors.push("Walls must be a list.");
+  return errors;
+}
+function serializePlan(state) {
+  const walls = (state.walls || []).map((w) => ({ a: [w.a[0], w.a[1]], b: [w.b[0], w.b[1]] }));
+  const openings = [];
+  for (const o of state.openings || []) {
+    const wallIndex = state.walls.findIndex((w) => w.id === o.wallId);
+    if (wallIndex < 0) continue;
+    openings.push({
+      type: o.type === "window" ? "window" : "door",
+      wallIndex,
+      t: o.t,
+      width: o.width,
+      height: o.height,
+      sill: o.sill ?? 0
+    });
+  }
+  return {
+    app: APP,
+    version: SCHEMA_VERSION,
+    title: state.title || "",
+    unit: "m",
+    dimMode: DIM_MODES.includes(state.dimMode) ? state.dimMode : "centreline",
+    wallHeight: WALL_HEIGHT,
+    wallThickness: WALL_THICK,
+    pins: (state.pins || []).map((p) => [p[0], p[1]]),
+    walls,
+    openings,
+    rooms: (state.rooms || []).map((r) => ({ name: r.name, labelAt: [r.centroid[0], r.centroid[1]] })),
+    furniture: (state.furniture || []).map((f) => ({
+      type: f.type,
+      x: f.x,
+      z: f.z,
+      rot: f.rot || 0,
+      w: f.w,
+      d: f.d,
+      hidden: !!f.hidden,
+      auto: !!f.auto,
+      name: f.name || "",
+      locked: !!f.locked
+    })),
+    decks: (state.decks || []).map((d) => ({
+      kind: d.kind === "veranda" ? "veranda" : "deck",
+      name: d.name || "",
+      x: d.x,
+      z: d.z,
+      w: d.w,
+      d: d.d
+    })),
+    steps: (state.steps || []).map((s) => ({
+      x: s.x,
+      z: s.z,
+      rot: s.rot || 0,
+      width: s.width,
+      count: s.count,
+      rise: s.rise,
+      going: s.going
+    })),
+    stumps: (state.stumps || []).map((s) => ({
+      x: s.x,
+      z: s.z,
+      size: s.size ?? STUMP_SIZE,
+      height: s.height ?? STUMP_HEIGHT
+    }))
+  };
+}
+function deserializePlan(data) {
+  const walls = (data.walls || []).map((w) => ({
+    id: uid("w"),
+    a: finitePair(w.a),
+    b: finitePair(w.b)
+  }));
+  const openings = (data.openings || []).map((o) => {
+    const wall = walls[o.wallIndex];
+    return {
+      id: uid(o.type === "window" ? "win" : "d"),
+      type: o.type === "window" ? "window" : "door",
+      wallId: wall.id,
+      t: Number(o.t),
+      width: Number(o.width),
+      height: Number(o.height),
+      sill: Number(o.sill || 0)
+    };
+  });
+  const labels = (data.rooms || []).map((r) => ({
+    name: String(r.name || "Room"),
+    at: finitePair(r.labelAt)
+  }));
+  const furniture = (data.furniture || []).map((f) => ({
+    id: uid("f"),
+    type: String(f.type || "plant"),
+    x: Number(f.x),
+    z: Number(f.z),
+    rot: finiteNum(f.rot, 0),
+    w: finiteNum(f.w, 0.45),
+    d: finiteNum(f.d, 0.45),
+    hidden: !!f.hidden,
+    auto: !!f.auto,
+    name: f.name ? String(f.name) : "",
+    locked: !!f.locked
+  }));
+  const pins = (data.pins || []).map((p) => finitePair(p));
+  const decks = (data.decks || []).map((d) => ({
+    id: uid("deck"),
+    kind: d.kind === "veranda" ? "veranda" : "deck",
+    name: d.name ? String(d.name) : d.kind === "veranda" ? "Veranda" : "Deck",
+    x: Number(d.x),
+    z: Number(d.z),
+    w: Number(d.w),
+    d: Number(d.d)
+  }));
+  const steps = (data.steps || []).map((s) => ({
+    id: uid("steps"),
+    x: Number(s.x),
+    z: Number(s.z),
+    rot: finiteNum(s.rot, 0),
+    width: finiteNum(s.width, 1.2),
+    count: Number(s.count),
+    rise: finiteNum(s.rise, 0.15),
+    going: finiteNum(s.going, 0.28)
+  }));
+  const stumps = (data.stumps || []).map((s) => ({
+    id: uid("stump"),
+    x: Number(s.x),
+    z: Number(s.z),
+    size: finiteNum(s.size, STUMP_SIZE),
+    height: finiteNum(s.height, STUMP_HEIGHT)
+  }));
+  return {
+    title: data.title ? String(data.title) : "",
+    dimMode: DIM_MODES.includes(data.dimMode) ? data.dimMode : "centreline",
+    walls,
+    openings,
+    labels,
+    furniture,
+    pins,
+    decks,
+    steps,
+    stumps
+  };
+}
+function importPlanData(data) {
+  if (typeof data === "string") {
+    try {
+      data = JSON.parse(String(data).replace(/^\uFEFF/, ""));
+    } catch {
+      throw new PlanError("That file is not valid JSON.");
+    }
+  }
+  const migrated = migratePlan(data);
+  const errors = validatePlan(migrated);
+  if (errors.length) throw new PlanError(errors);
+  return deserializePlan(migrated);
+}
+
+// js/io.js
+function downloadBlob(name, blob) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2e3);
+}
+function downloadText(name, text, type) {
+  downloadBlob(name, new Blob([text], { type }));
+}
+function readPlanText(text) {
+  return importPlanData(text);
+}
+function todayStamp() {
+  const d = /* @__PURE__ */ new Date();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+function exportSheet(state, kind, scale) {
+  const model = layoutSheet(state, { scale, date: todayStamp() });
+  if (kind === "svg") return { name: `neeky-plan-1-${model.scale}.svg`, blob: new Blob([toSvg(model)], { type: "image/svg+xml" }) };
+  if (kind === "pdf") return { name: `neeky-plan-1-${model.scale}.pdf`, blob: new Blob([toPdf(model)], { type: "application/pdf" }) };
+  return { name: "neeky-plan.dxf", blob: new Blob([toDxf(state)], { type: "application/dxf" }) };
+}
+
+// js/plan2d.js
+init_constants();
+init_elements();
 init_furniture();
+init_geom();
 function createPlan2D(canvas, getState, actions) {
   const ctx = canvas.getContext("2d");
   let dpr = 1;
@@ -36967,14 +38690,17 @@ function createPlan2D(canvas, getState, actions) {
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   }
   function resize() {
-    const rect2 = canvas.getBoundingClientRect();
+    const el = canvas.parentElement || canvas;
+    const rect2 = el.getBoundingClientRect();
     w = Math.max(1, rect2.width);
     h = Math.max(1, rect2.height);
     dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.floor(w * dpr);
-    canvas.height = Math.floor(h * dpr);
-    canvas.style.width = `${w}px`;
-    canvas.style.height = `${h}px`;
+    const bw = Math.max(1, Math.floor(w * dpr));
+    const bh = Math.max(1, Math.floor(h * dpr));
+    if (canvas.width !== bw) canvas.width = bw;
+    if (canvas.height !== bh) canvas.height = bh;
+    canvas.style.width = "";
+    canvas.style.height = "";
     draw();
   }
   function drawGrid(cam) {
@@ -37008,6 +38734,122 @@ function createPlan2D(canvas, getState, actions) {
       ctx.stroke();
     }
   }
+  function polyScreen(pts, cam) {
+    ctx.beginPath();
+    pts.forEach((p, i) => {
+      const q = toScreen(p, cam);
+      if (i === 0) ctx.moveTo(q.x, q.y);
+      else ctx.lineTo(q.x, q.y);
+    });
+    ctx.closePath();
+  }
+  function drawDeck(d, cam, ghost) {
+    const r = normalizeDeck(d);
+    if (r.w < 0.05 || r.d < 0.05) return;
+    polyScreen(deckCorners(r), cam);
+    ctx.fillStyle = d.kind === "veranda" ? "rgba(47,93,80,0.14)" : "rgba(166,138,96,0.32)";
+    ctx.fill();
+    ctx.strokeStyle = ghost ? COLORS.accent : "#6b6459";
+    ctx.lineWidth = ghost ? 1.6 : 1.3;
+    ctx.setLineDash(ghost ? [5, 4] : [7, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (!ghost) {
+      const mid = toScreen([r.x + r.w / 2, r.z + r.d / 2], cam);
+      ctx.fillStyle = COLORS.ink;
+      ctx.font = "500 12px IBM Plex Sans, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(d.name || (d.kind === "veranda" ? "Veranda" : "Deck"), mid.x, mid.y);
+    }
+  }
+  function drawSteps(step, cam, ghost) {
+    const corners = stepCorners(step);
+    polyScreen(corners, cam);
+    ctx.fillStyle = ghost ? "rgba(47,93,80,0.12)" : "rgba(232,224,208,0.9)";
+    ctx.fill();
+    ctx.strokeStyle = ghost ? COLORS.accent : COLORS.ink;
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    const n = step.count || 1;
+    for (let i = 1; i < n; i++) {
+      const t = i / n;
+      const a = [corners[0][0] + (corners[3][0] - corners[0][0]) * t, corners[0][1] + (corners[3][1] - corners[0][1]) * t];
+      const b = [corners[1][0] + (corners[2][0] - corners[1][0]) * t, corners[1][1] + (corners[2][1] - corners[1][1]) * t];
+      const sa = toScreen(a, cam);
+      const sb = toScreen(b, cam);
+      ctx.beginPath();
+      ctx.moveTo(sa.x, sa.y);
+      ctx.lineTo(sb.x, sb.y);
+      ctx.stroke();
+    }
+  }
+  function drawStump(s, cam, selected) {
+    const half = Math.max(2.5, (s.size || 0.15) / 2 * cam.zoom);
+    const c = toScreen([s.x, s.z], cam);
+    ctx.fillStyle = selected ? COLORS.accent : "#5c5348";
+    ctx.fillRect(c.x - half, c.y - half, half * 2, half * 2);
+    ctx.strokeStyle = COLORS.paper;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(c.x - half, c.y - half, half * 2, half * 2);
+  }
+  function drawNorth() {
+    const x = w - 28;
+    const y = 34;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = COLORS.ink;
+    ctx.beginPath();
+    ctx.moveTo(0, -16);
+    ctx.lineTo(6, 6);
+    ctx.lineTo(0, 2);
+    ctx.lineTo(-6, 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.font = "600 11px IBM Plex Sans, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("N", 0, -22);
+    ctx.restore();
+  }
+  function drawDimensions(cam, mode) {
+    const s = getState();
+    const box = dimensionBox(s.walls, mode || s.dimMode || "centreline");
+    if (!box || box.w <= 0.2) return;
+    const sw = toScreen([box.minX, box.minZ], cam);
+    const se = toScreen([box.maxX, box.minZ], cam);
+    const nw = toScreen([box.minX, box.maxZ], cam);
+    ctx.strokeStyle = COLORS.muted;
+    ctx.fillStyle = COLORS.muted;
+    ctx.lineWidth = 1;
+    ctx.font = "500 11px IBM Plex Mono, ui-monospace, monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const y = Math.max(sw.y, se.y) + 18;
+    ctx.beginPath();
+    ctx.moveTo(sw.x, sw.y + 4);
+    ctx.lineTo(sw.x, y + 5);
+    ctx.moveTo(se.x, se.y + 4);
+    ctx.lineTo(se.x, y + 5);
+    ctx.moveTo(sw.x, y);
+    ctx.lineTo(se.x, y);
+    ctx.stroke();
+    ctx.fillText(fmt(box.w), (sw.x + se.x) / 2, y + 12);
+    const x = Math.min(sw.x, nw.x) - 18;
+    ctx.beginPath();
+    ctx.moveTo(sw.x - 4, sw.y);
+    ctx.lineTo(x - 5, sw.y);
+    ctx.moveTo(nw.x - 4, nw.y);
+    ctx.lineTo(x - 5, nw.y);
+    ctx.moveTo(x, sw.y);
+    ctx.lineTo(x, nw.y);
+    ctx.stroke();
+    ctx.save();
+    ctx.translate(x - 12, (sw.y + nw.y) / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText(fmt(box.h), 0, 0);
+    ctx.restore();
+  }
   function draw() {
     const s = getState();
     if (!ctx || w < 2) return;
@@ -37016,15 +38858,23 @@ function createPlan2D(canvas, getState, actions) {
     ctx.fillRect(0, 0, w, h);
     const cam = s.camera2d;
     drawGrid(cam);
+    for (const d of s.decks || []) {
+      const on = s.selection?.kind === "deck" && s.selection.id === d.id;
+      drawDeck(d, cam, false);
+      if (on) {
+        polyScreen(deckCorners(d), cam);
+        ctx.strokeStyle = COLORS.accent;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([]);
+        ctx.stroke();
+      }
+    }
+    if (s.draft?.type === "deck") drawDeck(s.draft, cam, true);
+    for (const step of s.steps || []) drawSteps(step, cam, false);
+    if (s.draft?.type === "steps") drawSteps(s.draft, cam, true);
     for (const room of s.rooms) {
       if (room.points.length < 3) continue;
-      ctx.beginPath();
-      room.points.forEach((p, i) => {
-        const q = toScreen(p, cam);
-        if (i === 0) ctx.moveTo(q.x, q.y);
-        else ctx.lineTo(q.x, q.y);
-      });
-      ctx.closePath();
+      polyScreen(room.points, cam);
       const sel = s.selection?.kind === "room" && s.selection.id === room.id;
       ctx.fillStyle = sel ? "rgba(47,93,80,0.18)" : "rgba(28,25,23,0.045)";
       ctx.fill();
@@ -37040,18 +38890,18 @@ function createPlan2D(canvas, getState, actions) {
     }
     for (const wall of s.walls) {
       const a = toScreen(wall.a, cam);
-      const b2 = toScreen(wall.b, cam);
+      const b = toScreen(wall.b, cam);
       const sel = s.selection?.kind === "wall" && s.selection.id === wall.id;
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b2.x, b2.y);
+      ctx.lineTo(b.x, b.y);
       ctx.strokeStyle = sel ? COLORS.accent : COLORS.ink;
       ctx.lineWidth = Math.max(3, 0.2 * cam.zoom);
       ctx.lineCap = "butt";
       ctx.stroke();
     }
     for (const op of s.openings) {
-      const wall = s.walls.find((w2) => w2.id === op.wallId);
+      const wall = s.walls.find((wn) => wn.id === op.wallId);
       if (!wall) continue;
       const L = wallLen(wall);
       const t0 = op.t - op.width / 2 / L;
@@ -37059,16 +38909,16 @@ function createPlan2D(canvas, getState, actions) {
       const p0 = [wall.a[0] + (wall.b[0] - wall.a[0]) * t0, wall.a[1] + (wall.b[1] - wall.a[1]) * t0];
       const p1 = [wall.a[0] + (wall.b[0] - wall.a[0]) * t1, wall.a[1] + (wall.b[1] - wall.a[1]) * t1];
       const a = toScreen(p0, cam);
-      const b2 = toScreen(p1, cam);
+      const b = toScreen(p1, cam);
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b2.x, b2.y);
+      ctx.lineTo(b.x, b.y);
       ctx.strokeStyle = COLORS.paper;
       ctx.lineWidth = Math.max(5, 0.22 * cam.zoom);
       ctx.stroke();
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b2.x, b2.y);
+      ctx.lineTo(b.x, b.y);
       ctx.strokeStyle = op.type === "door" ? COLORS.accent : COLORS.muted;
       ctx.lineWidth = 1.5;
       ctx.setLineDash(op.type === "window" ? [4, 3] : []);
@@ -37076,9 +38926,13 @@ function createPlan2D(canvas, getState, actions) {
       ctx.setLineDash([]);
       if (s.selection?.kind === "opening" && s.selection.id === op.id) {
         ctx.strokeStyle = COLORS.accent;
-        ctx.strokeRect(Math.min(a.x, b2.x) - 6, Math.min(a.y, b2.y) - 6, Math.abs(b2.x - a.x) + 12, Math.abs(b2.y - a.y) + 12);
+        ctx.strokeRect(Math.min(a.x, b.x) - 6, Math.min(a.y, b.y) - 6, Math.abs(b.x - a.x) + 12, Math.abs(b.y - a.y) + 12);
       }
     }
+    for (const stump of s.stumps || []) {
+      drawStump(stump, cam, s.selection?.kind === "stump" && s.selection.id === stump.id);
+    }
+    if (s.draft?.type === "stump") drawStump(s.draft, cam, true);
     if (s.chain?.length) {
       ctx.setLineDash([6, 4]);
       ctx.strokeStyle = COLORS.accent;
@@ -37107,18 +38961,38 @@ function createPlan2D(canvas, getState, actions) {
     }
     for (const room of s.rooms) {
       const c = toScreen(room.centroid, cam);
-      if (insetArea(room) * cam.zoom < 28) continue;
-      ctx.fillStyle = COLORS.ink;
-      ctx.font = "500 13px IBM Plex Sans, sans-serif";
+      const area2 = internalArea(room);
+      if (area2 * cam.zoom < 28) continue;
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+      for (const p of room.points) {
+        const q = toScreen(p, cam);
+        minX = Math.min(minX, q.x);
+        maxX = Math.max(maxX, q.x);
+        minY = Math.min(minY, q.y);
+        maxY = Math.max(maxY, q.y);
+      }
+      const boxW = maxX - minX;
+      const boxH = maxY - minY;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(room.name, c.x, c.y - 7);
-      ctx.fillStyle = COLORS.muted;
+      ctx.font = "500 13px IBM Plex Sans, sans-serif";
+      const nameW = ctx.measureText(room.name).width;
+      if (nameW < boxW - 8 && boxH > 28) {
+        ctx.fillStyle = COLORS.ink;
+        ctx.fillText(room.name, c.x, c.y - 7);
+      }
       ctx.font = "400 11px IBM Plex Mono, ui-monospace, monospace";
-      ctx.fillText(fmtArea(insetArea(room)), c.x, c.y + 9);
+      const areaText = fmtArea(area2);
+      if (ctx.measureText(areaText).width < boxW - 8 && boxH > 16) {
+        ctx.fillStyle = COLORS.muted;
+        ctx.fillText(areaText, c.x, nameW < boxW - 8 && boxH > 28 ? c.y + 9 : c.y);
+      }
     }
     if (s.selection?.kind === "wall") {
-      const wall = s.walls.find((w2) => w2.id === s.selection.id);
+      const wall = s.walls.find((wn) => wn.id === s.selection.id);
       if (wall) {
         const mid = toScreen([(wall.a[0] + wall.b[0]) / 2, (wall.a[1] + wall.b[1]) / 2], cam);
         ctx.fillStyle = COLORS.accent;
@@ -37137,21 +39011,9 @@ function createPlan2D(canvas, getState, actions) {
         }
       }
     }
-    const b = bounds(s.walls);
-    if (b && b.w > 0.2) {
-      const sw = toScreen([b.minX, b.minZ], cam);
-      const ne = toScreen([b.maxX, b.maxZ], cam);
-      ctx.fillStyle = COLORS.muted;
-      ctx.font = "500 11px IBM Plex Mono, ui-monospace, monospace";
-      ctx.textAlign = "center";
-      ctx.fillText(fmt(b.w), (sw.x + ne.x) / 2, Math.max(sw.y, ne.y) + 16);
-      ctx.save();
-      ctx.translate(Math.min(sw.x, ne.x) - 14, (sw.y + ne.y) / 2);
-      ctx.rotate(-Math.PI / 2);
-      ctx.fillText(fmt(b.h), 0, 0);
-      ctx.restore();
-    }
-    if (!s.walls.length && !s.chain) {
+    drawDimensions(cam, s.dimMode);
+    drawNorth();
+    if (!s.walls.length && !s.chain && !(s.decks || []).length) {
       ctx.fillStyle = COLORS.muted;
       ctx.font = "500 16px IBM Plex Sans, sans-serif";
       ctx.textAlign = "center";
@@ -37160,12 +39022,12 @@ function createPlan2D(canvas, getState, actions) {
   }
   function fit() {
     const s = getState();
-    const b = bounds(s.walls);
+    const b = sceneBounds(s.walls, elementPoints(s));
     if (!b) {
       actions.setCamera2d({ x: 6, z: 5, zoom: 42 });
       return;
     }
-    const zoom = Math.min((w - 80) / Math.max(b.w, 1), (h - 80) / Math.max(b.h, 1), 64);
+    const zoom = Math.min((w - 120) / Math.max(b.w, 1), (h - 120) / Math.max(b.h, 1), 64);
     actions.setCamera2d({ x: b.minX + b.w / 2, z: b.minZ + b.h / 2, zoom: Math.max(18, zoom) });
   }
   let gesture = null;
@@ -37181,6 +39043,35 @@ function createPlan2D(canvas, getState, actions) {
     const r = canvas.getBoundingClientRect();
     return { x: r.left + pt.x, y: r.top + pt.y };
   }
+  function pinchInfo() {
+    const pts = [...pointers.values()];
+    if (pts.length < 2) return null;
+    const a = pts[0];
+    const b = pts[1];
+    return {
+      dist: Math.hypot(b.x - a.x, b.y - a.y) || 1,
+      mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+    };
+  }
+  function beginPinch() {
+    const info = pinchInfo();
+    if (!info) return;
+    clearHold();
+    const s = getState();
+    const world = toWorld(info.mid, s.camera2d);
+    gesture = { type: "pinch", dist: info.dist, mid: info.mid, zoom: s.camera2d.zoom, world };
+  }
+  function applyPinch() {
+    const info = pinchInfo();
+    if (!info || gesture?.type !== "pinch") return;
+    const zoom = Math.max(12, Math.min(90, gesture.zoom * (info.dist / gesture.dist)));
+    const o = origin();
+    actions.setCamera2d({
+      zoom,
+      x: gesture.world[0] - (info.mid.x - o.x) / zoom,
+      z: gesture.world[1] + (info.mid.y - o.y) / zoom
+    });
+  }
   canvas.addEventListener("pointerdown", (e) => {
     try {
       canvas.setPointerCapture(e.pointerId);
@@ -37190,6 +39081,10 @@ function createPlan2D(canvas, getState, actions) {
     const pt = local(e);
     pointers.set(e.pointerId, pt);
     const world = toWorld(pt, s.camera2d);
+    if (pointers.size >= 2) {
+      beginPinch();
+      return;
+    }
     if (e.button === 2) {
       gesture = { type: "menu" };
       return;
@@ -37210,12 +39105,21 @@ function createPlan2D(canvas, getState, actions) {
       }, 520);
       return;
     }
+    if (e.pointerType === "touch") {
+      gesture = { type: "pending", start: pt, world, pointerId: e.pointerId };
+      return;
+    }
     actions.pointerDown(world, pt, e);
     gesture = { type: "tool", start: pt, world };
   });
   canvas.addEventListener("pointermove", (e) => {
     const pt = local(e);
     if (pointers.has(e.pointerId)) pointers.set(e.pointerId, pt);
+    if (pointers.size >= 2) {
+      if (gesture?.type !== "pinch") beginPinch();
+      applyPinch();
+      return;
+    }
     const s = getState();
     const world = toWorld(pt, s.camera2d);
     if (gesture?.type === "pan") {
@@ -37226,6 +39130,14 @@ function createPlan2D(canvas, getState, actions) {
         zoom: cam.zoom
       });
       gesture.last = pt;
+      return;
+    }
+    if (gesture?.type === "pending" && e.pointerId === gesture.pointerId) {
+      if (Math.hypot(pt.x - gesture.start.x, pt.y - gesture.start.y) > 8) {
+        actions.pointerDown(gesture.world, gesture.start, e);
+        gesture = { type: "tool", start: gesture.start, world: gesture.world };
+        actions.pointerMove(world, pt);
+      }
       return;
     }
     if (gesture?.type === "hold" && e.pointerId === gesture.pointerId) {
@@ -37239,13 +39151,26 @@ function createPlan2D(canvas, getState, actions) {
       }
       return;
     }
-    if (gesture?.type === "menu") return;
+    if (gesture?.type === "menu" || gesture?.type === "pinch") return;
     actions.pointerMove(world, pt);
   });
   function endPointer(e) {
     pointers.delete(e.pointerId);
     const pt = local(e);
     const s = getState();
+    if (gesture?.type === "pinch") {
+      if (pointers.size >= 2) applyPinch();
+      else gesture = null;
+      clearHold();
+      return;
+    }
+    if (gesture?.type === "pending" && (!e.pointerId || e.pointerId === gesture.pointerId)) {
+      clearHold();
+      actions.pointerDown(gesture.world, gesture.start, e);
+      actions.pointerUp(toWorld(pt, s.camera2d), pt);
+      gesture = null;
+      return;
+    }
     if (gesture?.type === "hold" && (!e.pointerId || e.pointerId === gesture.pointerId)) {
       clearHold();
       actions.pointerDown(gesture.world, gesture.start, e);
@@ -37297,7 +39222,8 @@ function createPlan2D(canvas, getState, actions) {
     actions.contextMenu?.(toWorld(pt, s.camera2d), pt, { x: e.clientX, y: e.clientY });
   });
   const ro = new ResizeObserver(resize);
-  ro.observe(canvas);
+  ro.observe(canvas.parentElement || canvas);
+  resize();
   return {
     draw,
     fit,
@@ -37311,8 +39237,10 @@ function createPlan2D(canvas, getState, actions) {
   };
 }
 
-// js/app.js
+// js/panels.js
+init_constants();
 init_furniture();
+init_geom();
 var ICONS = {
   select: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 4 l14 8 -8 2 -2 8 z"/></svg>`,
   wall: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 18 V6 h4 v12 H4zm6 0 V10 h4 v8 h-4zm6 0 V8 h4 v10 h-4z"/></svg>`,
@@ -37320,6 +39248,9 @@ var ICONS = {
   window: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="5" y="5" width="14" height="14" rx="1"/><path d="M12 5 v14 M5 12 h14"/></svg>`,
   room: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 16 V8 l7-3 7 3 v8"/><path d="M9 16 v-4 h6 v4"/></svg>`,
   del: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 8 h12 l-1 12 H7z"/><path d="M9 8 V6 h6 v2"/><path d="M10 11 v6 M14 11 v6"/></svg>`,
+  deck: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 15 h16"/><path d="M6 15 v4 M10 15 v4 M14 15 v4 M18 15 v4"/><path d="M4 11 h16"/></svg>`,
+  steps: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 18 h5 v-4 h5 V10 h6"/></svg>`,
+  stumps: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="7" cy="8" r="1.4"/><circle cx="12" cy="8" r="1.4"/><circle cx="17" cy="8" r="1.4"/><circle cx="7" cy="13" r="1.4"/><circle cx="12" cy="13" r="1.4"/><circle cx="17" cy="13" r="1.4"/><circle cx="7" cy="18" r="1.4"/><circle cx="12" cy="18" r="1.4"/><circle cx="17" cy="18" r="1.4"/></svg>`,
   gen: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 4 v3 M12 17 v3 M4 12 h3 M17 12 h3"/><circle cx="12" cy="12" r="4.5"/></svg>`,
   undo: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 8 H5 v3"/><path d="M6 10 c2-4 12-4 14 3"/></svg>`,
   redo: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M16 8 h3 v3"/><path d="M18 10 c-2-4 -12-4 -14 3"/></svg>`,
@@ -37329,25 +39260,201 @@ var ICONS = {
   sofa: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="11" width="16" height="6" rx="1.4"/><path d="M6 11 V8 h12 v3"/><path d="M7 17 v2 M17 17 v2"/></svg>`,
   bed: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 16 V10 h16 v6"/><path d="M4 10 V7 h6 v3"/><path d="M3 16 h18"/></svg>`,
   table: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="8" width="16" height="3" rx="0.4"/><path d="M6 11 v8 M18 11 v8"/></svg>`,
+  bench: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 10 h18"/><path d="M5 10 v7 M19 10 v7"/><path d="M4 17 h16"/></svg>`,
+  robe: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="5" y="4" width="14" height="16" rx="1"/><path d="M12 4 v16"/></svg>`,
+  wc: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><ellipse cx="12" cy="14" rx="4" ry="5"/><rect x="8" y="4" width="8" height="4" rx="1"/></svg>`,
   lizard: `<svg viewBox="0 0 24 24" fill="currentColor"><ellipse cx="12" cy="13.5" rx="3" ry="6.2"/><circle cx="12" cy="6.2" r="2.1"/><ellipse cx="6.8" cy="10.5" rx="2.4" ry="1"/><ellipse cx="17.2" cy="10.5" rx="2.4" ry="1"/><ellipse cx="7.2" cy="16.5" rx="2.2" ry="0.9"/><ellipse cx="16.8" cy="16.5" rx="2.2" ry="0.9"/><rect x="11.2" y="3.2" width="1.6" height="1.4" rx="0.4" fill="#2f6aa0"/></svg>`
 };
-function mount(root) {
-  if (!root) return () => {
+function toolBtn(id, label, icon) {
+  return `<button type="button" class="tool" data-tool="${id}" title="${label}" aria-label="${label}">${icon}</button>`;
+}
+function shellHtml() {
+  return `
+  <div class="app">
+    <header class="toolbar">
+      <div class="brand">
+        <span class="mark" aria-hidden="true"></span>
+        <div class="titles">
+          <strong>Neeky</strong>
+          <span>Home Designer ${APP_VERSION_LABEL}</span>
+        </div>
+      </div>
+      <div class="cluster tools-cluster">
+        <div class="group">
+          ${toolBtn("select", "Select", ICONS.select)}
+          ${toolBtn("wall", "Wall", ICONS.wall)}
+          ${toolBtn("door", "Door", ICONS.door)}
+          ${toolBtn("window", "Window", ICONS.window)}
+          ${toolBtn("room", "Room name", ICONS.room)}
+          ${toolBtn("delete", "Delete", ICONS.del)}
+          ${toolBtn("deck", "Deck", ICONS.deck)}
+          ${toolBtn("steps", "Steps", ICONS.steps)}
+          ${toolBtn("stumps", "Stumps", ICONS.stumps)}
+        </div>
+        <button type="button" class="tool" id="furnish-btn" title="Furnish">${ICONS.furnish}<span>Furnish</span></button>
+        <button type="button" class="tool" id="gen-btn" title="Generate">${ICONS.gen}<span>Generate</span></button>
+      </div>
+      <div class="cluster view-cluster">
+        <div class="group view-group">
+          <button type="button" class="tool" data-view="split">Split</button>
+          <button type="button" class="tool" data-view="plan">Plan</button>
+          <button type="button" class="tool" data-view="model">3D</button>
+          <button type="button" class="tool" data-view="top">Top</button>
+        </div>
+        <div class="group">
+          <button type="button" class="tool" id="undo-btn" title="Undo">${ICONS.undo}</button>
+          <button type="button" class="tool" id="redo-btn" title="Redo">${ICONS.redo}</button>
+          <button type="button" class="tool" id="file-btn" title="File">${ICONS.file}</button>
+        </div>
+      </div>
+    </header>
+    <aside class="palette" id="palette">
+      <p class="pop-title">Furnish</p>
+      <div class="furn-grid" id="furn-grid"></div>
+      <button type="button" class="plants-toggle" id="plants-toggle">Hide plants</button>
+      <p class="dim-note">Drag onto the plan. Select anything to edit it. Right-click, or Tools, for more.</p>
+    </aside>
+    <div class="stage">
+      <div class="pane plan-pane">
+        <canvas id="plan-canvas"></canvas>
+      </div>
+      <div class="pane view-pane"><canvas id="view-canvas"></canvas></div>
+    </div>
+    <footer class="status" id="status"></footer>
+    <div id="toast" class="toast" hidden></div>
+    <div id="inspector" class="inspector" hidden></div>
+    <div id="ctx-menu" class="ctx-menu" hidden role="menu"></div>
+    <div id="popover" class="popover" hidden></div>
+    <input id="file-in" type="file" accept="application/json,.json" hidden />
+  </div>`;
+}
+function escapeHtml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function paletteHtml() {
+  const item = (id, name, dim) => {
+    const icon = id === "tank" ? ICONS.lizard : ICONS[id];
+    return `<button type="button" class="furn-item${id === "tank" ? " furn-tank" : ""}" data-furn="${id}">${icon}<span class="copy"><strong>${name}</strong><span class="dim">${dim}</span></span></button>`;
   };
-  root.innerHTML = shellHtml();
-  const $ = (sel) => root.querySelector(sel);
-  const canvas2d = $("#plan-canvas");
-  const canvas3d = $("#view-canvas");
-  const status = $("#status");
-  const pop = $("#popover");
-  const appEl = root.querySelector(".app");
-  fillPalette();
-  const state = {
+  return [
+    item("plant", "Plant", "0.45 m"),
+    item("sofa", "Sofa", "2.20 × 0.90 m"),
+    item("bed", "Bed", "2.00 × 1.60 m"),
+    item("table", "Table", "1.40 × 0.80 m"),
+    item("bench", "Bench", "2.40 × 0.60 m"),
+    item("robe", "Robe", "1.80 × 0.60 m"),
+    item("wc", "WC", "0.40 × 0.70 m"),
+    item("tank", "Blue-tongue", "1.80 × 0.60 m · wall")
+  ].join("");
+}
+function inspField(name, label, value, span) {
+  return `<label class="insp-field${span ? " span2" : ""}">${label}<input data-field="${name}" inputmode="decimal" autocomplete="off" value="${escapeHtml(value)}" /></label>`;
+}
+function nameField(value) {
+  return `<label class="insp-field span2">Name<input data-field="name" maxlength="32" autocomplete="off" value="${escapeHtml(value)}" /></label>`;
+}
+function menuHtml(state, obj, splitT) {
+  const sel = state.selection;
+  if (!sel || !obj) return "";
+  const rows = [];
+  const act = (id, label, extra = "") => rows.push(`<button type="button" role="menuitem" data-act="${id}" ${extra}>${label}</button>`);
+  const sep = () => rows.push(`<div class="ctx-sep"></div>`);
+  const heading = (t) => rows.push(`<div class="ctx-label">${t}</div>`);
+  if (sel.kind === "furniture") {
+    heading("Nudge 0.10 m");
+    rows.push(`<div class="ctx-nudge">
+      <button type="button" data-act="nudge" data-x="-1" data-z="0">Left</button>
+      <button type="button" data-act="nudge" data-x="1" data-z="0">Right</button>
+      <button type="button" data-act="nudge" data-x="0" data-z="1">Up</button>
+      <button type="button" data-act="nudge" data-x="0" data-z="-1">Down</button>
+    </div>`);
+    sep();
+    if (obj.type !== "tank" && obj.type !== "plant") {
+      act("rot90", "Rotate 90°");
+      act("rot45", "Rotate 45°");
+      act("turn", "Turn around");
+      act("mirror", "Mirror");
+      act("swap", "Swap width and depth");
+      sep();
+      act("align", "Align to nearest wall");
+    }
+    if (obj.type === "tank") act("realign", "Realign to wall");
+    act("dup", "Duplicate");
+    if (obj.type !== "tank") act("center", "Center in room");
+    if (obj.type !== "tank") act("reset", "Reset size");
+    act("lock", obj.locked ? "Unlock" : "Lock position");
+    act("hide", "Hide");
+    sep();
+    heading("Change to");
+    for (const [id, spec] of Object.entries(FURN)) {
+      if (id === obj.type) continue;
+      act("retype", spec.label, `data-type="${id}"`);
+    }
+    sep();
+    act("del", "Delete", `class="danger"`);
+  } else if (sel.kind === "wall") {
+    act("split-half", "Split in half");
+    if (splitT != null && Math.abs(splitT - 0.5) > 0.08) act("split-here", "Split here");
+    act("straighten", "Straighten to axis");
+    sep();
+    act("add-door", "Add door");
+    act("add-window", "Add window");
+    sep();
+    act("del", "Delete wall", `class="danger"`);
+  } else if (sel.kind === "opening") {
+    act("center-op", "Center on wall");
+    act("widen", "Fit wall width");
+    act(obj.type === "door" ? "to-window" : "to-door", obj.type === "door" ? "Make window" : "Make door");
+    sep();
+    act("del", "Delete", `class="danger"`);
+  } else if (sel.kind === "room") {
+    act("plants-hide", "Hide plants in this room");
+    act("plants-show", "Show plants in this room");
+    act("rename", "Rename");
+  } else if (sel.kind === "deck") {
+    act("veranda", obj.kind === "veranda" ? "Make deck" : "Make veranda");
+    sep();
+    act("del", "Delete", `class="danger"`);
+  } else if (sel.kind === "steps") {
+    act("rot90", "Rotate 90°");
+    sep();
+    act("del", "Delete", `class="danger"`);
+  } else if (sel.kind === "stump") {
+    act("del", "Delete stump", `class="danger"`);
+  }
+  return rows.join("");
+}
+function kickerFor(sel, obj) {
+  if (!sel || !obj) return "";
+  if (sel.kind === "wall") return "Wall";
+  if (sel.kind === "opening") return obj.type === "window" ? "Window" : "Door";
+  if (sel.kind === "room") return "Room";
+  if (sel.kind === "deck") return obj.kind === "veranda" ? "Veranda" : "Deck";
+  if (sel.kind === "steps") return "Steps";
+  if (sel.kind === "stump") return "Stump";
+  const type = obj.type === "tank" ? "Blue-tongue" : FURN[obj.type]?.label || furnLabel(obj);
+  return obj.locked ? `${type} · Locked` : type;
+}
+function roomAreaText(room) {
+  return fmtArea(internalArea(room));
+}
+
+// js/store.js
+init_constants();
+init_constants();
+init_furniture();
+function createState() {
+  return {
     walls: [],
     openings: [],
     labels: [],
     rooms: [],
     furniture: [],
+    decks: [],
+    steps: [],
+    stumps: [],
+    title: "",
+    dimMode: "centreline",
     tool: "wall",
     furnish: "plant",
     view: "split",
@@ -37358,6 +39465,7 @@ function mount(root) {
     chain: null,
     preview: null,
     ghost: null,
+    draft: null,
     camera2d: { x: 8, z: 6, zoom: 36 },
     past: [],
     future: [],
@@ -37366,80 +39474,169 @@ function mount(root) {
     menuAt: null,
     focusField: null
   };
+}
+function snapshot(state) {
+  return {
+    walls: state.walls.map((w) => ({ ...w, a: [...w.a], b: [...w.b] })),
+    openings: state.openings.map((o) => ({ ...o })),
+    labels: state.labels.map((l) => ({ ...l, at: [...l.at] })),
+    furniture: state.furniture.map(cloneFurn),
+    pins: (state.pins || []).map((p) => [...p]),
+    decks: (state.decks || []).map((d) => ({ ...d })),
+    steps: (state.steps || []).map((s) => ({ ...s })),
+    stumps: (state.stumps || []).map((s) => ({ ...s })),
+    title: state.title || ""
+  };
+}
+function applySnapshot(state, s) {
+  state.walls = s.walls;
+  state.openings = s.openings;
+  state.labels = s.labels;
+  state.furniture = s.furniture || [];
+  state.pins = (s.pins || []).map((p) => [...p]);
+  state.decks = (s.decks || []).map((d) => ({ ...d }));
+  state.steps = (s.steps || []).map((d) => ({ ...d }));
+  state.stumps = (s.stumps || []).map((d) => ({ ...d }));
+  state.title = s.title || "";
+}
+function checkpoint(state) {
+  state.past.push(snapshot(state));
+  if (state.past.length > 60) state.past.shift();
+  state.future = [];
+}
+function createPersist(getState) {
+  let timer = 0;
+  function write() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(serializePlan(getState())));
+    } catch {
+    }
+  }
+  return {
+    persist() {
+      clearTimeout(timer);
+      timer = setTimeout(write, 280);
+    },
+    persistNow() {
+      clearTimeout(timer);
+      timer = 0;
+      write();
+    },
+    cancel() {
+      clearTimeout(timer);
+      timer = 0;
+    }
+  };
+}
+
+// js/app.js
+var DIM_ORDER = ["centreline", "inside", "outside"];
+var DIM_LABEL = { centreline: "Centreline", inside: "Inside", outside: "Outside" };
+function mount(root) {
+  if (!root) return () => {
+  };
+  root.innerHTML = shellHtml();
+  const $ = (sel) => root.querySelector(sel);
+  const canvas2d = $("#plan-canvas");
+  const canvas3d = $("#view-canvas");
+  const status = $("#status");
+  const pop = $("#popover");
+  const appEl = root.querySelector(".app");
+  $("#furn-grid").innerHTML = paletteHtml();
+  const state = createState();
+  const persist = createPersist(() => state);
   let view3d = null;
   let dragging = null;
   let inspectorSig = "";
   let flashTimer = 0;
-  function roomsOf() {
-    return assignLabels(computeRooms(state.walls), state.labels);
-  }
+  let toastTimer = 0;
+  let alive = true;
   function refreshRooms() {
-    state.rooms = roomsOf();
+    state.rooms = assignLabels(computeRooms(state.walls), state.labels);
     state.labels = labelsFromRooms(state.rooms);
   }
-  function snapshot() {
-    return {
-      walls: state.walls.map((w) => ({ ...w, a: [...w.a], b: [...w.b] })),
-      openings: state.openings.map((o) => ({ ...o })),
-      labels: state.labels.map((l) => ({ ...l, at: [...l.at] })),
-      furniture: state.furniture.map(cloneFurn),
-      pins: (state.pins || []).map((p) => [...p])
-    };
-  }
-  function applySnap(s) {
-    state.walls = s.walls;
-    state.openings = s.openings;
-    state.labels = s.labels;
-    state.furniture = s.furniture || [];
-    state.pins = (s.pins || []).map((p) => [...p]);
-    refreshRooms();
-  }
-  function checkpoint() {
-    state.past.push(snapshot());
-    if (state.past.length > 60) state.past.shift();
-    state.future = [];
-  }
-  function prunePins() {
-    const verts = [];
-    for (const w of state.walls) verts.push(w.a, w.b);
-    state.pins = (state.pins || []).filter((p) => verts.some((v) => dist(v, p) < 1e-3));
-  }
   function commit() {
-    const oldWalls = state.walls;
-    state.walls = mergeCollinear(planarize(state.walls), state.pins || []);
-    state.openings = rebindOpenings(state.openings, oldWalls, state.walls);
-    prunePins();
-    refreshRooms();
-    persist();
+    const norm = normalizePlan(state);
+    state.walls = norm.walls;
+    state.openings = norm.openings;
+    state.pins = norm.pins;
+    state.rooms = norm.rooms;
+    state.labels = norm.labels;
+    persist.persist();
     render();
   }
-  function persist() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(serializePlan({ ...state, rooms: state.rooms })));
-    } catch {
+  function flash(msg) {
+    state.note = msg;
+    updateStatus();
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => {
+      state.note = "";
+      updateStatus();
+    }, 2200);
+  }
+  function showError(msg) {
+    const el = $("#toast");
+    el.hidden = false;
+    el.textContent = msg;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      el.hidden = true;
+    }, 6500);
+  }
+  const commands = createCommands(state, {
+    checkpoint: () => checkpoint(state),
+    commit,
+    render: () => render(),
+    refreshRooms,
+    flash,
+    markInspectorDirty() {
+      inspectorSig = "";
     }
+  });
+  function coarse() {
+    return window.matchMedia?.("(pointer: coarse)")?.matches;
+  }
+  function viewBox() {
+    return { width: canvas2d.clientWidth, height: canvas2d.clientHeight, coarse: coarse() };
+  }
+  function pick(world, screen) {
+    return pickHit(state, world, screen, viewBox());
   }
   function loadPlan(plan, pushHistory) {
-    if (pushHistory) {
-      state.past.push(snapshot());
-      state.future = [];
-    }
-    state.walls = plan.walls;
-    state.openings = plan.openings;
-    state.labels = plan.labels;
-    state.furniture = (plan.furniture || []).map(cloneFurn);
-    state.pins = (plan.pins || []).map((p) => [p[0], p[1]]);
+    if (pushHistory) checkpoint(state);
+    const norm = normalizePlan({
+      walls: plan.walls || [],
+      openings: plan.openings || [],
+      labels: plan.labels || [],
+      pins: plan.pins || [],
+      furniture: plan.furniture || [],
+      decks: plan.decks || [],
+      steps: plan.steps || [],
+      stumps: plan.stumps || [],
+      title: plan.title || ""
+    });
+    state.walls = norm.walls;
+    state.openings = norm.openings;
+    state.labels = norm.labels;
+    state.rooms = norm.rooms;
+    state.pins = norm.pins;
+    state.furniture = (norm.furniture || []).map(cloneFurn);
+    state.decks = (norm.decks || []).map((d) => ({ ...d }));
+    state.steps = (norm.steps || []).map((s) => ({ ...s }));
+    state.stumps = (norm.stumps || []).map((s) => ({ ...s }));
+    state.title = plan.title || "";
+    if (plan.dimMode) state.dimMode = plan.dimMode;
     state.chain = null;
     state.preview = null;
     state.ghost = null;
+    state.draft = null;
     state.selection = null;
     state.menuAt = null;
     state.focusField = null;
     state.note = "";
-    refreshRooms();
     ensurePlants(state);
-    persist();
     state.tool = "select";
+    persist.persistNow();
     render();
     requestAnimationFrame(() => {
       plan2d.fit();
@@ -37461,6 +39658,23 @@ function mount(root) {
         render();
         return;
       }
+      if (state.tool === "deck") {
+        const p = snapPt(world, g);
+        state.draft = { type: "deck", kind: "deck", name: "Deck", x: p[0], z: p[1], w: 0, d: 0 };
+        dragging = { type: "deck" };
+        render();
+        return;
+      }
+      if (state.tool === "steps") {
+        commands.edit(() => {
+          commands.placeSteps(world, Math.PI / 2);
+        });
+        return;
+      }
+      if (state.tool === "stumps") {
+        commands.edit(() => commands.placeStump(world));
+        return;
+      }
       if (state.tool === "wall") {
         const p = joinPoint(snapPt(world, g), state.walls, g);
         if (!state.chain) {
@@ -37471,16 +39685,16 @@ function mount(root) {
           const aligned = axisAlign(last, p);
           const end = joinPoint(snapPt(aligned, g), state.walls, g);
           if (dist(end, state.chain[0]) < g && state.chain.length >= 3) {
-            checkpoint();
-            addWall(last, state.chain[0]);
+            checkpoint(state);
+            commands.addWall(last, state.chain[0]);
             state.chain = null;
             state.preview = null;
             commit();
             return;
           }
           if (dist(last, end) >= g) {
-            checkpoint();
-            addWall(last, end);
+            checkpoint(state);
+            commands.addWall(last, end);
             state.chain.push(end);
             commit();
           }
@@ -37489,7 +39703,7 @@ function mount(root) {
         return;
       }
       if (state.tool === "door" || state.tool === "window") {
-        placeOpening(world, state.tool);
+        commands.placeOpening(world, state.tool);
         return;
       }
       if (state.tool === "room") {
@@ -37498,12 +39712,12 @@ function mount(root) {
         return;
       }
       if (state.tool === "delete") {
-        deleteAt(world);
+        commands.deleteHit(pick(world, screen));
         return;
       }
       const hit = pick(world, screen);
       if (hit?.kind === "handle") {
-        checkpoint();
+        checkpoint(state);
         dragging = { type: "handle", wallId: hit.wallId, which: hit.which };
         state.selection = { kind: "wall", id: hit.wallId };
         return;
@@ -37515,15 +39729,38 @@ function mount(root) {
           render();
           return;
         }
-        checkpoint();
+        checkpoint(state);
         dragging = { type: "furniture", id: hit.id };
         render();
         return;
       }
       if (hit?.kind === "opening") {
-        checkpoint();
+        checkpoint(state);
         dragging = { type: "opening", id: hit.id };
         state.selection = { kind: "opening", id: hit.id };
+        render();
+        return;
+      }
+      if (hit?.kind === "deck") {
+        const deck = state.decks.find((d) => d.id === hit.id);
+        state.selection = { kind: "deck", id: hit.id };
+        checkpoint(state);
+        dragging = { type: "move-deck", id: hit.id, dx: world[0] - deck.x, dz: world[1] - deck.z };
+        render();
+        return;
+      }
+      if (hit?.kind === "steps") {
+        const step = state.steps.find((s) => s.id === hit.id);
+        state.selection = { kind: "steps", id: hit.id };
+        checkpoint(state);
+        dragging = { type: "move-steps", id: hit.id, dx: world[0] - step.x, dz: world[1] - step.z };
+        render();
+        return;
+      }
+      if (hit?.kind === "stump") {
+        state.selection = { kind: "stump", id: hit.id };
+        checkpoint(state);
+        dragging = { type: "move-stump", id: hit.id };
         render();
         return;
       }
@@ -37546,6 +39783,13 @@ function mount(root) {
         state.ghost = placeFurniture(state.furnish, world, state, state.ghost?.rot || dragging?.rot || 0);
         plan2d.draw();
         updateStatus();
+        return;
+      }
+      if (dragging?.type === "deck" && state.draft) {
+        const p = snapPt(world, g);
+        state.draft.w = p[0] - state.draft.x;
+        state.draft.d = p[1] - state.draft.z;
+        plan2d.draw();
         return;
       }
       if (state.chain) {
@@ -37588,13 +39832,51 @@ function mount(root) {
           op.t = clampOpening(wall, pr.t, op.width);
           render();
         }
+        return;
+      }
+      if (dragging?.type === "move-deck") {
+        const deck = state.decks.find((d) => d.id === dragging.id);
+        if (!deck) return;
+        const p = snapPt([world[0] - dragging.dx, world[1] - dragging.dz], g);
+        deck.x = p[0];
+        deck.z = p[1];
+        render();
+        return;
+      }
+      if (dragging?.type === "move-steps") {
+        const step = state.steps.find((s) => s.id === dragging.id);
+        if (!step) return;
+        const p = snapPt([world[0] - dragging.dx, world[1] - dragging.dz], g);
+        step.x = p[0];
+        step.z = p[1];
+        render();
+        return;
+      }
+      if (dragging?.type === "move-stump") {
+        const stump = state.stumps.find((s) => s.id === dragging.id);
+        if (!stump) return;
+        const p = snapPt(world, g);
+        stump.x = p[0];
+        stump.z = p[1];
+        render();
       }
     },
     pointerUp() {
+      if (dragging?.type === "deck") {
+        const draft = state.draft;
+        state.draft = null;
+        dragging = null;
+        if (draft && Math.abs(draft.w) >= 0.4 && Math.abs(draft.d) >= 0.4) {
+          checkpoint(state);
+          commands.placeDeck(draft);
+          commit();
+        } else render();
+        return;
+      }
       if (dragging?.type === "place") {
         if (state.ghost?.valid) {
-          checkpoint();
-          addFurniture(state.ghost);
+          checkpoint(state);
+          commands.addFurniture(state.ghost);
           commit();
         }
         state.ghost = null;
@@ -37622,6 +39904,7 @@ function mount(root) {
       state.chain = null;
       state.preview = null;
       state.ghost = null;
+      state.draft = null;
       dragging = null;
       state.selection = { kind: hit.kind === "handle" ? "wall" : hit.kind, id: hit.kind === "handle" ? hit.wallId : hit.id };
       state.menuAt = [...world];
@@ -37630,9 +39913,7 @@ function mount(root) {
       openMenu(client.x, client.y);
     },
     doubleClick(world, screen) {
-      if (state.tool === "wall" || state.tool === "door" || state.tool === "window" || state.tool === "delete" || state.tool === "furnish") {
-        return false;
-      }
+      if (["wall", "door", "window", "delete", "furnish", "deck", "steps", "stumps"].includes(state.tool)) return false;
       const hit = pick(world, screen);
       if (!hit || hit.kind === "handle") return false;
       state.selection = { kind: hit.kind, id: hit.id };
@@ -37643,120 +39924,6 @@ function mount(root) {
       return true;
     }
   };
-  function addFurniture(ghost) {
-    const spec = FURN[ghost.type];
-    state.furniture.push({
-      id: uid("f"),
-      type: ghost.type,
-      x: ghost.x,
-      z: ghost.z,
-      rot: ghost.rot || 0,
-      w: ghost.w || spec?.w || 0.45,
-      d: ghost.d || spec?.d || 0.45,
-      auto: false,
-      hidden: false
-    });
-    state.selection = { kind: "furniture", id: state.furniture.at(-1).id };
-  }
-  function removeFurniture(id) {
-    const f = state.furniture.find((x) => x.id === id);
-    if (!f) return;
-    if (f.type === "plant" && f.auto) f.hidden = true;
-    else state.furniture = state.furniture.filter((x) => x.id !== id);
-    if (state.selection?.kind === "furniture" && state.selection.id === id) state.selection = null;
-  }
-  function addWall(a, b) {
-    if (dist(a, b) < 0.2) return;
-    const oldWalls = state.walls;
-    state.walls = planarize(mergeCollinear([...state.walls, { id: uid("w"), a: [...a], b: [...b] }], state.pins || []));
-    state.openings = rebindOpenings(state.openings, oldWalls, state.walls);
-    refreshRooms();
-    ensurePlants(state);
-  }
-  function placeOpening(world, type) {
-    const hit = nearestWall(world, state.walls, 0.45);
-    if (!hit) return;
-    const width = type === "door" ? DOOR_W : WIN_W;
-    if (!openingFits(hit.wall, hit.t, Math.min(width, wallLen(hit.wall) - 0.2))) return;
-    const w = Math.min(width, wallLen(hit.wall) - 0.2);
-    checkpoint();
-    state.openings.push({
-      id: uid(type === "door" ? "d" : "win"),
-      type,
-      wallId: hit.wall.id,
-      t: clampOpening(hit.wall, hit.t, w),
-      width: w,
-      height: type === "door" ? DOOR_H : WIN_H,
-      sill: type === "door" ? 0 : WIN_SILL
-    });
-    state.selection = { kind: "opening", id: state.openings.at(-1).id };
-    commit();
-  }
-  function deleteAt(world) {
-    const hit = pick(world, { x: 0, y: 0 });
-    if (hit?.kind === "furniture") {
-      checkpoint();
-      removeFurniture(hit.id);
-      commit();
-      return;
-    }
-    if (hit?.kind === "opening") {
-      checkpoint();
-      state.openings = state.openings.filter((o) => o.id !== hit.id);
-      commit();
-      return;
-    }
-    if (hit?.kind === "wall") {
-      checkpoint();
-      state.openings = state.openings.filter((o) => o.wallId !== hit.id);
-      state.walls = state.walls.filter((w) => w.id !== hit.id);
-      refreshRooms();
-      commit();
-    }
-  }
-  function pick(world, screen) {
-    if (state.selection?.kind === "wall") {
-      const wall = state.walls.find((w) => w.id === state.selection.id);
-      if (wall) {
-        const o = { x: canvas2d.clientWidth / 2, y: canvas2d.clientHeight / 2 };
-        for (const which of ["a", "b"]) {
-          const p = wall[which];
-          const sx = o.x + (p[0] - state.camera2d.x) * state.camera2d.zoom;
-          const sy = o.y - (p[1] - state.camera2d.z) * state.camera2d.zoom;
-          if (Math.hypot(sx - screen.x, sy - screen.y) <= 10) {
-            return { kind: "handle", wallId: wall.id, which };
-          }
-        }
-      }
-    }
-    for (const f of state.furniture) {
-      if (containsPoint(f, world)) return { kind: "furniture", id: f.id };
-    }
-    for (const op of state.openings) {
-      const wall = state.walls.find((w) => w.id === op.wallId);
-      if (!wall) continue;
-      const L = wallLen(wall);
-      const a = [
-        wall.a[0] + (wall.b[0] - wall.a[0]) * (op.t - op.width / 2 / L),
-        wall.a[1] + (wall.b[1] - wall.a[1]) * (op.t - op.width / 2 / L)
-      ];
-      const b = [
-        wall.a[0] + (wall.b[0] - wall.a[0]) * (op.t + op.width / 2 / L),
-        wall.a[1] + (wall.b[1] - wall.a[1]) * (op.t + op.width / 2 / L)
-      ];
-      const dx = b[0] - a[0];
-      const dz = b[1] - a[1];
-      const l2 = dx * dx + dz * dz || 1;
-      const t = Math.max(0, Math.min(1, ((world[0] - a[0]) * dx + (world[1] - a[1]) * dz) / l2));
-      const q = [a[0] + dx * t, a[1] + dz * t];
-      if (Math.hypot(world[0] - q[0], world[1] - q[1]) < 0.25) return { kind: "opening", id: op.id };
-    }
-    const nw = nearestWall(world, state.walls, 0.28);
-    if (nw) return { kind: "wall", id: nw.wall.id };
-    const room = state.rooms.find((r) => pointInPoly(world, r.points));
-    if (room) return { kind: "room", id: room.id };
-    return null;
-  }
   function render() {
     plan2d.draw();
     view3d?.setSelectedRoom(state.selection?.kind === "room" ? state.selection.id : null);
@@ -37766,31 +39933,32 @@ function mount(root) {
     syncInspector();
   }
   function updateStatus() {
-    const total = state.rooms.reduce((s, r) => s + insetArea(r), 0);
+    const net = state.rooms.reduce((s, r) => s + internalArea(r), 0);
+    const gfa = state.walls.length ? grossFloorArea(state.walls) : 0;
     let extra = "";
     let action = "";
     if (state.ghost && state.ghost.valid === false) {
-      extra = state.ghost.reason === "door" ? " \xB7 cannot sit in a doorway" : state.ghost.reason === "wall" ? " \xB7 snap the tank to a wall" : " \xB7 drop inside a room";
+      extra = state.ghost.reason === "door" ? " · cannot sit in a doorway" : state.ghost.reason === "wall" ? " · snap the tank to a wall" : " · drop inside a room";
     } else if (state.selection?.kind === "wall") {
       const w = state.walls.find((x) => x.id === state.selection.id);
-      if (w) extra = ` \xB7 wall ${fmt(wallLen(w))}`;
+      if (w) extra = ` · wall ${fmt(wallLen(w))}`;
     } else if (state.selection?.kind === "room") {
       const r = state.rooms.find((x) => x.id === state.selection.id);
-      if (r) extra = ` \xB7 ${r.name} ${fmtArea(insetArea(r))}`;
+      if (r) extra = ` · ${r.name} ${roomAreaText(r)}`;
     } else if (state.selection?.kind === "furniture") {
       const f = state.furniture.find((x) => x.id === state.selection.id);
       if (f) {
-        extra = ` \xB7 ${furnLabel(f)}${f.locked ? " \xB7 locked" : ""}${f.type === "tank" ? " 1.80 \xD7 0.60 m" : ""}`;
-        if (f.type === "plant" && !f.hidden) {
-          action = `<button type="button" class="snap-btn" data-act="hide-plant">Hide plant</button>`;
-        }
+        extra = ` · ${furnLabel(f)}${f.locked ? " · locked" : ""}${f.type === "tank" ? " 1.80 × 0.60 m" : ""}`;
+        if (f.type === "plant" && !f.hidden) action = `<button type="button" class="snap-btn" data-act="hide-plant">Hide plant</button>`;
       }
     } else if (state.preview && state.chain?.length) {
-      extra = ` \xB7 ${fmt(dist(state.chain.at(-1), state.preview))}`;
+      extra = ` · ${fmt(dist(state.chain.at(-1), state.preview))}`;
     } else if (state.tool === "furnish") {
-      extra = ` \xB7 ${FURN[state.furnish]?.label || "Furnish"} \u2014 drag to place`;
-    }
-    if (state.note) extra += ` \xB7 ${state.note}`;
+      extra = ` · ${FURN[state.furnish]?.label || "Furnish"} — drag to place`;
+    } else if (state.tool === "deck") extra = " · drag a deck rectangle";
+    else if (state.tool === "steps") extra = " · click to place steps";
+    else if (state.tool === "stumps") extra = " · click to place a stump";
+    if (state.note) extra += ` · ${state.note}`;
     const toolName = {
       select: "Select",
       wall: "Wall",
@@ -37798,22 +39966,32 @@ function mount(root) {
       window: "Window",
       room: "Room name",
       delete: "Delete",
-      furnish: "Furnish"
+      furnish: "Furnish",
+      deck: "Deck",
+      steps: "Steps",
+      stumps: "Stumps"
     }[state.tool];
     status.innerHTML = `<button type="button" class="snap-btn" data-act="snap">Snap ${state.snap.toFixed(2)} m</button>
+      <button type="button" class="snap-btn" data-act="dim">Dims ${DIM_LABEL[state.dimMode] || "Centreline"}</button>
       <span>${toolName}</span>
       ${action}
       <span class="grow"></span>
-      <span class="mono">${state.rooms.length} rooms \xB7 ${fmtArea(total)}${extra}</span>
-      <span class="hint">Right-click for tools \xB7 \u232B delete \xB7 R rotate \xB7 \u2318Z undo</span>`;
+      <span class="mono">${state.rooms.length} rooms · net ${fmtArea(net)} · GFA ${fmtArea(gfa)}${extra}</span>
+      <span class="hint">Right-click for tools · ⌫ delete · R rotate · ⌘Z undo</span>`;
     status.querySelector("[data-act=snap]")?.addEventListener("click", () => {
       state.snap = state.snap === SNAP ? SNAP_FINE : SNAP;
       updateStatus();
     });
+    status.querySelector("[data-act=dim]")?.addEventListener("click", () => {
+      const i = DIM_ORDER.indexOf(state.dimMode);
+      state.dimMode = DIM_ORDER[(i + 1) % DIM_ORDER.length];
+      persist.persistNow();
+      render();
+    });
     status.querySelector("[data-act=hide-plant]")?.addEventListener("click", () => {
       const f = state.furniture.find((x) => x.id === state.selection?.id);
       if (f) {
-        checkpoint();
+        checkpoint(state);
         f.hidden = true;
         state.selection = null;
         commit();
@@ -37847,6 +40025,7 @@ function mount(root) {
     state.tool = t;
     state.chain = null;
     state.preview = null;
+    state.draft = null;
     if (t !== "furnish") state.ghost = null;
     hidePop();
     hideMenu();
@@ -37856,29 +40035,30 @@ function mount(root) {
     if (v === "top") {
       state.view = "model";
       view3d?.topView(state);
-    } else {
-      state.view = v;
-    }
+    } else state.view = v;
     syncTools();
     requestAnimationFrame(() => {
       plan2d.resize();
+      view3d?.resize();
       view3d?.rebuild(state);
     });
   }
   function undo() {
     const prev = state.past.pop();
     if (!prev) return;
-    state.future.push(snapshot());
-    applySnap(prev);
-    persist();
+    state.future.push(snapshot(state));
+    applySnapshot(state, prev);
+    refreshRooms();
+    persist.persistNow();
     render();
   }
   function redo() {
     const nxt = state.future.pop();
     if (!nxt) return;
-    state.past.push(snapshot());
-    applySnap(nxt);
-    persist();
+    state.past.push(snapshot(state));
+    applySnapshot(state, nxt);
+    refreshRooms();
+    persist.persistNow();
     render();
   }
   function hidePop() {
@@ -37916,7 +40096,7 @@ function mount(root) {
     input.select();
     pop.querySelectorAll("[data-n]").forEach(
       (b) => b.addEventListener("click", () => {
-        checkpoint();
+        checkpoint(state);
         room.name = b.dataset.n;
         state.labels = labelsFromRooms(state.rooms);
         hidePop();
@@ -37925,27 +40105,12 @@ function mount(root) {
     );
     pop.querySelector("#name-form").addEventListener("submit", (e) => {
       e.preventDefault();
-      checkpoint();
+      checkpoint(state);
       room.name = input.value.trim() || "Room";
       state.labels = labelsFromRooms(state.rooms);
       hidePop();
       commit();
     });
-  }
-  function furnishItem(id, name, dim) {
-    const icon = id === "tank" ? ICONS.lizard : ICONS[id];
-    return `<button type="button" class="furn-item${id === "tank" ? " furn-tank" : ""}" data-furn="${id}">${icon}<span class="copy"><strong>${name}</strong><span class="dim">${dim}</span></span></button>`;
-  }
-  function fillPalette() {
-    const grid = $("#furn-grid");
-    if (!grid) return;
-    grid.innerHTML = [
-      furnishItem("plant", "Plant", "0.45 m"),
-      furnishItem("sofa", "Sofa", "2.20 \xD7 0.90 m"),
-      furnishItem("bed", "Bed", "2.00 \xD7 1.60 m"),
-      furnishItem("table", "Table", "1.40 \xD7 0.80 m"),
-      furnishItem("tank", "Blue-tongue", "1.80 \xD7 0.60 m \xB7 wall")
-    ].join("");
   }
   function genPopover(anchor) {
     const hasType = (t) => state.furniture.some((f) => f.type === t && !f.hidden);
@@ -37956,10 +40121,10 @@ function mount(root) {
       `<form class="pop-form gen-form" id="gen-form" autocomplete="off">
         <p class="pop-title">Generate a home</p>
         <label class="brief-label">Type a brief
-          <textarea name="brief" id="gen-brief" rows="3" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="2 bedroom apartment, 75 m\xB2, open living kitchen"></textarea>
+          <textarea name="brief" id="gen-brief" rows="3" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="2 bedroom apartment, 75 m², open living kitchen"></textarea>
         </label>
         <p class="pop-title">Include from the palette</p>
-        <p class="dim-note">Tick pieces you also place by hand \u2014 they are laid into the new plan.</p>
+        <p class="dim-note">Tick pieces you also place by hand — they are laid into the new plan.</p>
         <div class="chips keep-list">
           <button type="button" class="chip ${on("plant", true)}" data-inc="plants" aria-pressed="${pressed("plant", true)}">Plants</button>
           <button type="button" class="chip ${on("sofa")}" data-inc="sofa" aria-pressed="${pressed("sofa")}">Sofa</button>
@@ -37968,42 +40133,30 @@ function mount(root) {
           <button type="button" class="chip ${on("tank")}" data-inc="tank" aria-pressed="${pressed("tank")}">Blue-tongue</button>
         </div>
         <div class="chips">
-          <button type="button" class="chip" data-preset="studio">Studio 45 m\xB2</button>
-          <button type="button" class="chip" data-preset="twoBed">Two-bed 85 m\xB2</button>
-          <button type="button" class="chip" data-preset="family">Family 160 m\xB2</button>
+          <button type="button" class="chip" data-preset="studio">Studio 45 m²</button>
+          <button type="button" class="chip" data-preset="twoBed">Two-bed 85 m²</button>
+          <button type="button" class="chip" data-preset="family">Family 160 m²</button>
         </div>
-        <div class="gen-row">
-          <span class="gen-label">Bedrooms</span>
-          <div class="chips">
-            <button type="button" class="chip" data-beds="0">Studio</button>
-            <button type="button" class="chip" data-beds="1">1</button>
-            <button type="button" class="chip" data-beds="2">2</button>
-            <button type="button" class="chip active" data-beds="3">3</button>
-            <button type="button" class="chip" data-beds="4">4</button>
-          </div>
-        </div>
-        <div class="gen-row">
-          <span class="gen-label">Baths</span>
-          <div class="chips">
-            <button type="button" class="chip" data-baths="1">1</button>
-            <button type="button" class="chip active" data-baths="2">2</button>
-          </div>
-        </div>
-        <div class="gen-row">
-          <span class="gen-label">About</span>
-          <div class="chips">
-            <button type="button" class="chip" data-area="45">45 m\xB2</button>
-            <button type="button" class="chip" data-area="85">85 m\xB2</button>
-            <button type="button" class="chip active" data-area="160">160 m\xB2</button>
-          </div>
-        </div>
-        <div class="gen-row">
-          <span class="gen-label">Kitchen</span>
-          <div class="chips">
-            <button type="button" class="chip active" data-kit="open">Open</button>
-            <button type="button" class="chip" data-kit="separate">Separate</button>
-          </div>
-        </div>
+        <div class="gen-row"><span class="gen-label">Bedrooms</span><div class="chips">
+          <button type="button" class="chip" data-beds="0">Studio</button>
+          <button type="button" class="chip" data-beds="1">1</button>
+          <button type="button" class="chip" data-beds="2">2</button>
+          <button type="button" class="chip active" data-beds="3">3</button>
+          <button type="button" class="chip" data-beds="4">4</button>
+        </div></div>
+        <div class="gen-row"><span class="gen-label">Baths</span><div class="chips">
+          <button type="button" class="chip" data-baths="1">1</button>
+          <button type="button" class="chip active" data-baths="2">2</button>
+        </div></div>
+        <div class="gen-row"><span class="gen-label">About</span><div class="chips">
+          <button type="button" class="chip" data-area="45">45 m²</button>
+          <button type="button" class="chip" data-area="85">85 m²</button>
+          <button type="button" class="chip active" data-area="160">160 m²</button>
+        </div></div>
+        <div class="gen-row"><span class="gen-label">Kitchen</span><div class="chips">
+          <button type="button" class="chip active" data-kit="open">Open</button>
+          <button type="button" class="chip" data-kit="separate">Separate</button>
+        </div></div>
         <div class="mode-row">
           <label class="radio"><input type="radio" name="mode" value="replace" checked /> Replace current</label>
           <label class="radio"><input type="radio" name="mode" value="new" /> New from this</label>
@@ -38031,13 +40184,7 @@ function mount(root) {
     });
     const includeOf = () => {
       const onChip = (v) => form.querySelector(`[data-inc="${v}"]`)?.classList.contains("active");
-      return {
-        plants: onChip("plants"),
-        sofa: onChip("sofa"),
-        bed: onChip("bed"),
-        table: onChip("table"),
-        tank: onChip("tank")
-      };
+      return { plants: onChip("plants"), sofa: onChip("sofa"), bed: onChip("bed"), table: onChip("table"), tank: onChip("tank") };
     };
     const specOf = () => {
       const spec = {
@@ -38059,7 +40206,7 @@ function mount(root) {
       }
       loadPlan({ ...plan, furniture: [] }, mode === "replace");
       placeDefaultFurniture(state, include);
-      persist();
+      persist.persistNow();
       render();
       hidePop();
     };
@@ -38084,9 +40231,7 @@ function mount(root) {
     area2.addEventListener("keydown", stopKeys);
     area2.addEventListener("keyup", stopKeys);
     area2.addEventListener("keypress", stopKeys);
-    requestAnimationFrame(() => {
-      area2.focus({ preventScroll: false });
-    });
+    requestAnimationFrame(() => area2.focus({ preventScroll: false }));
   }
   function filePopover(anchor) {
     showPop(
@@ -38096,11 +40241,20 @@ function mount(root) {
         <button type="button" data-f="new">New</button>
         <button type="button" data-f="open">Open JSON</button>
         <button type="button" data-f="save">Save JSON</button>
-        <button type="button" data-f="gltf">Download .gltf</button>
-      </div>`
+        <button type="button" data-f="glb">Download .glb</button>
+        <p class="pop-title">Sheet</p>
+        <button type="button" data-f="svg" data-scale="50">Plan SVG 1:50</button>
+        <button type="button" data-f="svg" data-scale="100">Plan SVG 1:100</button>
+        <button type="button" data-f="pdf" data-scale="50">Plan PDF 1:50</button>
+        <button type="button" data-f="pdf" data-scale="100">Plan PDF 1:100</button>
+        <button type="button" data-f="dxf">DXF</button>
+        <p class="pop-title">Site</p>
+        <button type="button" data-f="stumps">Stump grid under house</button>
+      </div>`,
+      280
     );
     pop.querySelector("[data-f=new]").onclick = () => {
-      loadPlan({ walls: [], openings: [], labels: [], furniture: [] }, true);
+      loadPlan({ walls: [], openings: [], labels: [], furniture: [], decks: [], steps: [], stumps: [] }, true);
       hidePop();
     };
     pop.querySelector("[data-f=open]").onclick = () => {
@@ -38108,36 +40262,26 @@ function mount(root) {
       hidePop();
     };
     pop.querySelector("[data-f=save]").onclick = () => {
-      download(`neeky-plan.json`, JSON.stringify(serializePlan({ ...state, rooms: state.rooms }), null, 2), "application/json");
+      downloadText("neeky-plan.json", JSON.stringify(serializePlan(state), null, 2), "application/json");
       hidePop();
     };
-    pop.querySelector("[data-f=gltf]").onclick = async () => {
+    pop.querySelector("[data-f=glb]").onclick = async () => {
       const bin = await view3d.exportGLTF();
-      const blob = new Blob([bin], { type: "model/gltf-binary" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = "neeky-house.glb";
-      a.click();
+      downloadBlob("neeky-house.glb", new Blob([bin], { type: "model/gltf-binary" }));
       hidePop();
     };
-  }
-  function download(name, text, type) {
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([text], { type }));
-    a.download = name;
-    a.click();
-  }
-  function escapeHtml(s) {
-    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  }
-  function flash(msg) {
-    state.note = msg;
-    updateStatus();
-    clearTimeout(flashTimer);
-    flashTimer = setTimeout(() => {
-      state.note = "";
-      updateStatus();
-    }, 2200);
+    pop.querySelectorAll("[data-f=svg], [data-f=pdf], [data-f=dxf]").forEach((btn) => {
+      btn.onclick = () => {
+        const kind = btn.dataset.f;
+        const file = exportSheet(state, kind === "dxf" ? "dxf" : kind, Number(btn.dataset.scale || 50));
+        downloadBlob(file.name, file.blob);
+        hidePop();
+      };
+    });
+    pop.querySelector("[data-f=stumps]").onclick = () => {
+      commands.edit(() => commands.fillStumps());
+      hidePop();
+    };
   }
   function fmtNum(n) {
     if (!Number.isFinite(n)) return "";
@@ -38151,20 +40295,16 @@ function mount(root) {
     const d = Math.round((rot || 0) * 180 / Math.PI % 360);
     return (d + 360) % 360;
   }
-  function selectedObj() {
-    const sel = state.selection;
-    if (!sel) return null;
-    if (sel.kind === "furniture") return state.furniture.find((f) => f.id === sel.id) || null;
-    if (sel.kind === "wall") return state.walls.find((w) => w.id === sel.id) || null;
-    if (sel.kind === "opening") return state.openings.find((o) => o.id === sel.id) || null;
-    if (sel.kind === "room") return state.rooms.find((r) => r.id === sel.id) || null;
-    return null;
-  }
   function anchorWorld() {
     const sel = state.selection;
-    const obj = selectedObj();
+    const obj = selectedObj(state);
     if (!sel || !obj) return null;
     if (sel.kind === "furniture") return [obj.x, obj.z];
+    if (sel.kind === "stump" || sel.kind === "steps") return [obj.x, obj.z];
+    if (sel.kind === "deck") {
+      const d = normalizeDeck(obj);
+      return [d.x + d.w / 2, d.z + d.d / 2];
+    }
     if (sel.kind === "wall") return [(obj.a[0] + obj.b[0]) / 2, (obj.a[1] + obj.b[1]) / 2];
     if (sel.kind === "room") return obj.centroid;
     const wall = state.walls.find((w) => w.id === obj.wallId);
@@ -38179,30 +40319,23 @@ function mount(root) {
     const sy = rect2.height / 2 - (p[1] - cam.z) * cam.zoom;
     return { x: rect2.left - rootR.left + sx, y: rect2.top - rootR.top + sy };
   }
-  function kickerText() {
-    const sel = state.selection;
-    const obj = selectedObj();
-    if (!sel || !obj) return "";
-    if (sel.kind === "wall") return "Wall";
-    if (sel.kind === "opening") return obj.type === "window" ? "Window" : "Door";
-    if (sel.kind === "room") return "Room";
-    const type = obj.type === "tank" ? "Blue-tongue" : FURN[obj.type]?.label || "Piece";
-    return obj.locked ? `${type} \xB7 Locked` : type;
-  }
   function inspectorSignature() {
     const sel = state.selection;
-    const obj = selectedObj();
+    const obj = selectedObj(state);
     if (!sel || !obj || state.chain) return "";
     if (sel.kind === "furniture") return `f:${obj.id}:${obj.type}:${obj.locked ? 1 : 0}`;
     if (sel.kind === "opening") return `o:${obj.id}:${obj.type}`;
     if (sel.kind === "wall") return `w:${obj.id}`;
     if (sel.kind === "room") return `r:${obj.id}`;
+    if (sel.kind === "deck") return `deck:${obj.id}:${obj.kind}`;
+    if (sel.kind === "steps") return `steps:${obj.id}`;
+    if (sel.kind === "stump") return `stump:${obj.id}`;
     return "";
   }
   function fieldValue(obj, field) {
     const sel = state.selection;
     if (field === "name") {
-      if (sel?.kind === "room") return obj.name || "";
+      if (sel?.kind === "room" || sel?.kind === "deck") return obj.name || "";
       return obj.name || (obj.type === "tank" ? "Blue-tongue" : FURN[obj.type]?.label || "");
     }
     if (field === "len") return fmtNum(wallLen(obj));
@@ -38212,44 +40345,10 @@ function mount(root) {
     if (field === "w" || field === "dia") return fmtNum(obj.w);
     if (field === "d") return fmtNum(obj.d);
     if (field === "rot") return String(rotDeg(obj.rot));
+    if (field === "count") return String(obj.count || 0);
+    if (field === "going") return fmtNum(obj.going);
+    if (field === "size") return fmtNum(obj.size);
     return "";
-  }
-  function refitOpenings(wall) {
-    const L = wallLen(wall);
-    for (const op of state.openings) {
-      if (op.wallId !== wall.id) continue;
-      op.width = Math.min(op.width, Math.max(0.35, L - 0.2));
-      op.t = clampOpening(wall, op.t, op.width);
-    }
-  }
-  function setWallLength(wall, len) {
-    const L = wallLen(wall);
-    if (!(L > 1e-6)) return;
-    len = clamp(len, 0.4, 40);
-    const dx = (wall.b[0] - wall.a[0]) / L;
-    const dz = (wall.b[1] - wall.a[1]) / L;
-    const nb = [wall.a[0] + dx * len, wall.a[1] + dz * len];
-    const oldB = [...wall.b];
-    const delta = [nb[0] - oldB[0], nb[1] - oldB[1]];
-    if (Math.hypot(delta[0], delta[1]) < 1e-6) return;
-    const hits = [];
-    for (const w of state.walls) {
-      for (const which of ["a", "b"]) {
-        if (dist(w[which], oldB) < 1e-3) hits.push([w, which]);
-      }
-    }
-    const moved = [oldB[0] + delta[0], oldB[1] + delta[1]];
-    for (const [w, which] of hits) w[which] = [...moved];
-    state.pins = (state.pins || []).map((p) => dist(p, oldB) < 1e-3 ? [...moved] : p);
-    for (const w of state.walls) refitOpenings(w);
-    refreshRooms();
-  }
-  function objectBy(kind, id) {
-    if (kind === "furniture") return state.furniture.find((f) => f.id === id) || null;
-    if (kind === "wall") return state.walls.find((w) => w.id === id) || null;
-    if (kind === "opening") return state.openings.find((o) => o.id === id) || null;
-    if (kind === "room") return state.rooms.find((r) => r.id === id) || null;
-    return null;
   }
   function writeField(obj, field, raw, kind = state.selection?.kind) {
     if (field === "name") {
@@ -38259,6 +40358,10 @@ function mount(root) {
         state.labels = labelsFromRooms(state.rooms);
         return;
       }
+      if (kind === "deck") {
+        obj.name = text || (obj.kind === "veranda" ? "Veranda" : "Deck");
+        return;
+      }
       const fallback = obj.type === "tank" ? "Blue-tongue" : FURN[obj.type]?.label || "";
       obj.name = !text || text === fallback ? "" : text;
       return;
@@ -38266,7 +40369,7 @@ function mount(root) {
     const n = typeof raw === "number" ? raw : parseLen(raw);
     if (n == null) return;
     if (kind === "wall" && field === "len") {
-      setWallLength(obj, n);
+      commands.setWallLength(obj, n);
       return;
     }
     if (kind === "opening") {
@@ -38284,6 +40387,20 @@ function mount(root) {
       }
       return;
     }
+    if (kind === "deck" && (field === "w" || field === "d")) {
+      obj[field] = clamp(n, 0.4, 40);
+      return;
+    }
+    if (kind === "steps") {
+      if (field === "width") obj.width = clamp(n, 0.6, 4);
+      else if (field === "count") obj.count = clamp(Math.round(n), 1, 20);
+      else if (field === "going") obj.going = clamp(n, 0.15, 0.5);
+      return;
+    }
+    if (kind === "stump" && field === "size") {
+      obj.size = clamp(n, 0.08, 0.45);
+      return;
+    }
     if (kind !== "furniture") return;
     if (field === "dia") {
       const d = clamp(n, 0.15, 1.8);
@@ -38292,15 +40409,9 @@ function mount(root) {
     } else if (field === "w" || field === "d") obj[field] = clamp(n, 0.25, 6);
     else if (field === "rot") obj.rot = (n % 360 + 360) % 360 * Math.PI / 180;
   }
-  function inspField(name, label, value, span) {
-    return `<label class="insp-field${span ? " span2" : ""}">${label}<input data-field="${name}" inputmode="decimal" autocomplete="off" value="${escapeHtml(value)}" /></label>`;
-  }
-  function nameField(value) {
-    return `<label class="insp-field span2">Name<input data-field="name" maxlength="32" autocomplete="off" value="${escapeHtml(value)}" /></label>`;
-  }
   function inspectorBody() {
     const sel = state.selection;
-    const obj = selectedObj();
+    const obj = selectedObj(state);
     if (!sel || !obj) return "";
     if (sel.kind === "wall") return inspField("len", "Length m", fieldValue(obj, "len"), true);
     if (sel.kind === "opening") {
@@ -38308,38 +40419,45 @@ function mount(root) {
       if (obj.type === "window") bits.push(inspField("sill", "Sill m", fieldValue(obj, "sill"), true));
       return bits.join("");
     }
-    if (sel.kind === "room") return `${nameField(obj.name || "")}<p class="insp-read">${escapeHtml(fmtArea(insetArea(obj)))}</p>`;
-    if (obj.type === "tank") return `${nameField(fieldValue(obj, "name"))}<p class="insp-read">1.80 \xD7 0.60 m \xB7 snaps to a wall</p>`;
+    if (sel.kind === "room") return `${nameField(obj.name || "")}<p class="insp-read">${escapeHtml(roomAreaText(obj))}</p>`;
+    if (sel.kind === "deck") {
+      return [nameField(obj.name || ""), inspField("w", "Width m", fieldValue(obj, "w")), inspField("d", "Depth m", fieldValue(obj, "d"))].join("");
+    }
+    if (sel.kind === "steps") {
+      return [inspField("width", "Width m", fieldValue(obj, "width")), inspField("count", "Risers", fieldValue(obj, "count")), inspField("going", "Going m", fieldValue(obj, "going"), true)].join("");
+    }
+    if (sel.kind === "stump") return inspField("size", "Size m", fieldValue(obj, "size"), true);
+    if (obj.type === "tank") return `${nameField(fieldValue(obj, "name"))}<p class="insp-read">1.80 × 0.60 m · snaps to a wall</p>`;
     if (obj.type === "plant") return `${nameField(fieldValue(obj, "name"))}${inspField("dia", "Diameter m", fieldValue(obj, "dia"), true)}`;
     return [
       nameField(fieldValue(obj, "name")),
       inspField("w", "Width m", fieldValue(obj, "w")),
       inspField("d", "Depth m", fieldValue(obj, "d")),
-      inspField("rot", "Angle \xB0", fieldValue(obj, "rot"), true)
+      inspField("rot", "Angle °", fieldValue(obj, "rot"), true)
     ].join("");
   }
   function bindInspectorFields(el) {
     el.querySelectorAll("[data-field]").forEach((input) => {
       let base = null;
       input.addEventListener("focus", () => {
-        base = snapshot();
+        base = snapshot(state);
         input.dataset.kind = state.selection?.kind || "";
         input.dataset.sid = state.selection?.id || "";
         if (input.dataset.field !== "name") requestAnimationFrame(() => input.select());
       });
       input.addEventListener("input", () => {
-        const obj = objectBy(input.dataset.kind, input.dataset.sid) || selectedObj();
+        const obj = objectBy(state, input.dataset.kind, input.dataset.sid) || selectedObj(state);
         if (!obj) return;
         writeField(obj, input.dataset.field, input.value, input.dataset.kind || state.selection?.kind);
         paintLive();
       });
       input.addEventListener("blur", () => {
         if (!base) return;
-        const obj = objectBy(input.dataset.kind, input.dataset.sid);
+        const obj = objectBy(state, input.dataset.kind, input.dataset.sid);
         if (obj) writeField(obj, input.dataset.field, input.value, input.dataset.kind);
         const prev = base;
         base = null;
-        if (JSON.stringify(snapshot()) === JSON.stringify(prev)) {
+        if (JSON.stringify(snapshot(state)) === JSON.stringify(prev)) {
           refreshInspectorValues();
           return;
         }
@@ -38368,17 +40486,17 @@ function mount(root) {
   }
   function refreshInspectorValues() {
     const el = $("#inspector");
-    const obj = selectedObj();
+    const obj = selectedObj(state);
     if (!obj) return;
     const kicker = el.querySelector(".insp-kicker");
-    if (kicker) kicker.textContent = kickerText();
+    if (kicker) kicker.textContent = kickerFor(state.selection, obj);
     el.querySelectorAll("[data-field]").forEach((input) => {
       if (input === document.activeElement) return;
       const next = fieldValue(obj, input.dataset.field);
       if (input.value !== next) input.value = next;
     });
     const read = el.querySelector(".insp-read");
-    if (read && state.selection?.kind === "room") read.textContent = fmtArea(insetArea(obj));
+    if (read && state.selection?.kind === "room") read.textContent = roomAreaText(obj);
   }
   function placeInspector() {
     const el = $("#inspector");
@@ -38431,7 +40549,7 @@ function mount(root) {
     if (sig !== inspectorSig) {
       inspectorSig = sig;
       el.hidden = false;
-      el.innerHTML = `<div class="insp-bar"><span class="insp-kicker">${escapeHtml(kickerText())}</span><button type="button" class="insp-more" id="insp-more" aria-haspopup="menu" title="Object tools">Tools</button></div><div class="insp-grid">${inspectorBody()}</div>`;
+      el.innerHTML = `<div class="insp-bar"><span class="insp-kicker">${escapeHtml(kickerFor(state.selection, selectedObj(state)))}</span><button type="button" class="insp-more" id="insp-more" aria-haspopup="menu" title="Object tools">Tools</button></div><div class="insp-grid">${inspectorBody()}</div>`;
       bindInspectorFields(el);
     } else {
       el.hidden = false;
@@ -38451,78 +40569,11 @@ function mount(root) {
     menu.hidden = true;
     menu.innerHTML = "";
   }
-  function splitParam(wall) {
-    if (!state.menuAt) return null;
-    const pr = projectOnSeg(state.menuAt, wall.a, wall.b);
-    if (pr.dist > 0.45 || pr.t < 0.12 || pr.t > 0.88) return null;
-    return pr.t;
-  }
-  function menuHtml() {
-    const sel = state.selection;
-    const obj = selectedObj();
-    if (!sel || !obj) return "";
-    const rows = [];
-    const act = (id, label, extra = "") => rows.push(`<button type="button" role="menuitem" data-act="${id}" ${extra}>${label}</button>`);
-    const sep = () => rows.push(`<div class="ctx-sep"></div>`);
-    const heading = (t) => rows.push(`<div class="ctx-label">${t}</div>`);
-    if (sel.kind === "furniture") {
-      heading("Nudge 0.10 m");
-      rows.push(`<div class="ctx-nudge">
-        <button type="button" data-act="nudge" data-x="-1" data-z="0">Left</button>
-        <button type="button" data-act="nudge" data-x="1" data-z="0">Right</button>
-        <button type="button" data-act="nudge" data-x="0" data-z="1">Up</button>
-        <button type="button" data-act="nudge" data-x="0" data-z="-1">Down</button>
-      </div>`);
-      sep();
-      if (obj.type !== "tank" && obj.type !== "plant") {
-        act("rot90", "Rotate 90\xB0");
-        act("rot45", "Rotate 45\xB0");
-        act("turn", "Turn around");
-        act("mirror", "Mirror");
-        act("swap", "Swap width and depth");
-        sep();
-        act("align", "Align to nearest wall");
-      }
-      if (obj.type === "tank") act("realign", "Realign to wall");
-      act("dup", "Duplicate");
-      if (obj.type !== "tank") act("center", "Center in room");
-      if (obj.type !== "tank") act("reset", "Reset size");
-      act("lock", obj.locked ? "Unlock" : "Lock position");
-      act("hide", "Hide");
-      sep();
-      heading("Change to");
-      for (const [id, spec] of Object.entries(FURN)) {
-        if (id === obj.type) continue;
-        act("retype", spec.label, `data-type="${id}"`);
-      }
-      sep();
-      act("del", "Delete", `class="danger"`);
-    } else if (sel.kind === "wall") {
-      act("split-half", "Split in half");
-      const t = splitParam(obj);
-      if (t != null && Math.abs(t - 0.5) > 0.08) act("split-here", "Split here");
-      act("straighten", "Straighten to axis");
-      sep();
-      act("add-door", "Add door");
-      act("add-window", "Add window");
-      sep();
-      act("del", "Delete wall", `class="danger"`);
-    } else if (sel.kind === "opening") {
-      act("center-op", "Center on wall");
-      act("widen", "Fit wall width");
-      act(obj.type === "door" ? "to-window" : "to-door", obj.type === "door" ? "Make window" : "Make door");
-      sep();
-      act("del", "Delete", `class="danger"`);
-    } else if (sel.kind === "room") {
-      act("plants-hide", "Hide plants in this room");
-      act("plants-show", "Show plants in this room");
-      act("rename", "Rename");
-    }
-    return rows.join("");
-  }
   function openMenu(clientX, clientY) {
     const menu = $("#ctx-menu");
-    const html = menuHtml();
+    const obj = selectedObj(state);
+    const splitT = state.selection?.kind === "wall" && obj ? commands.splitParam(obj) : null;
+    const html = menuHtml(state, obj, splitT);
     if (!html) {
       hideMenu();
       return;
@@ -38544,275 +40595,8 @@ function mount(root) {
     menu.style.left = `${Math.max(pad, Math.round(x))}px`;
     menu.style.top = `${Math.round(y)}px`;
   }
-  function edit(fn) {
-    checkpoint();
-    const ok = fn();
-    if (ok === false) {
-      state.past.pop();
-      render();
-      return;
-    }
-    commit();
-  }
-  function duplicateFurn(f) {
-    const copy = cloneFurn(f);
-    copy.id = uid("f");
-    copy.auto = false;
-    copy.locked = false;
-    let placed = false;
-    for (const [dx, dz] of [
-      [0.4, 0.4],
-      [0.45, 0],
-      [0, 0.45],
-      [-0.4, 0.3]
-    ]) {
-      const x = f.x + dx;
-      const z = f.z + dz;
-      if (f.type === "tank") {
-        const s = snapTank([x, z], state);
-        if (!s.valid) continue;
-        copy.x = s.x;
-        copy.z = s.z;
-        copy.rot = s.rot;
-        copy.w = s.w;
-        copy.d = s.d;
-        placed = true;
-        break;
-      }
-      if (state.rooms.some((r) => pointInPoly([x, z], r.points))) {
-        copy.x = x;
-        copy.z = z;
-        placed = true;
-        break;
-      }
-    }
-    if (!placed) {
-      copy.x = f.x + 0.4;
-      copy.z = f.z + 0.4;
-    }
-    state.furniture.push(copy);
-    state.selection = { kind: "furniture", id: copy.id };
-  }
-  function changeFurnType(f, type) {
-    if (!type || type === f.type || !FURN[type]) return false;
-    if (type === "tank") {
-      const s = snapTank([f.x, f.z], state);
-      if (!s.valid) {
-        flash(s.reason === "door" ? "Doorway is in the way" : "Needs a clear wall");
-        return false;
-      }
-      f.type = "tank";
-      f.x = s.x;
-      f.z = s.z;
-      f.rot = s.rot;
-      f.w = s.w;
-      f.d = s.d;
-      f.auto = false;
-      return true;
-    }
-    const spec = FURN[type];
-    f.type = type;
-    f.w = spec.w;
-    f.d = spec.d;
-    f.auto = false;
-    if (type === "plant") f.rot = 0;
-    return true;
-  }
-  function splitWall(wall, t) {
-    t = clamp(t, 0.08, 0.92);
-    const p = [wall.a[0] + (wall.b[0] - wall.a[0]) * t, wall.a[1] + (wall.b[1] - wall.a[1]) * t];
-    const L = wallLen(wall);
-    const w1 = { id: wall.id, a: [...wall.a], b: [...p] };
-    const w2 = { id: uid("w"), a: [...p], b: [...wall.b] };
-    for (const op of state.openings) {
-      if (op.wallId !== wall.id) continue;
-      const along = op.t * L;
-      const host = along <= t * L ? w1 : w2;
-      const local = host === w1 ? along : along - t * L;
-      const hostL = Math.max(wallLen(host), 1e-6);
-      op.wallId = host.id;
-      op.width = Math.min(op.width, Math.max(0.35, hostL * 0.72));
-      op.t = clampOpening(host, local / hostL, op.width);
-    }
-    const i = state.walls.findIndex((w) => w.id === wall.id);
-    state.walls.splice(i, 1, w1, w2);
-    state.pins = state.pins || [];
-    state.pins.push(p);
-    state.selection = { kind: "wall", id: w1.id };
-  }
-  function addOpeningOn(wall, type) {
-    const L = wallLen(wall);
-    const want = type === "door" ? DOOR_W : WIN_W;
-    if (L < want + 0.2) {
-      flash("Wall is too short");
-      return false;
-    }
-    const width = Math.min(want, L - 0.2);
-    const op = {
-      id: uid(type === "door" ? "d" : "win"),
-      type,
-      wallId: wall.id,
-      width,
-      t: clampOpening(wall, 0.5, width),
-      height: type === "door" ? DOOR_H : WIN_H,
-      sill: type === "door" ? 0 : WIN_SILL
-    };
-    state.openings.push(op);
-    state.selection = { kind: "opening", id: op.id };
-    return true;
-  }
-  function runFurn(f, act, ds) {
-    if (act === "nudge") {
-      const dx = Number(ds.x || 0) * 0.1;
-      const dz = Number(ds.z || 0) * 0.1;
-      edit(() => {
-        if (f.type === "tank") {
-          const s = snapTank([f.x + dx, f.z + dz], state);
-          if (!s.valid) {
-            flash(s.reason === "door" ? "Doorway is in the way" : "Needs a clear wall");
-            return false;
-          }
-          f.x = s.x;
-          f.z = s.z;
-          f.rot = s.rot;
-          return;
-        }
-        f.x += dx;
-        f.z += dz;
-      });
-      return;
-    }
-    edit(() => {
-      if (act === "rot90") f.rot = (f.rot || 0) + Math.PI / 2;
-      else if (act === "rot45") f.rot = (f.rot || 0) + Math.PI / 4;
-      else if (act === "turn") f.rot = (f.rot || 0) + Math.PI;
-      else if (act === "mirror") f.rot = -(f.rot || 0);
-      else if (act === "swap") {
-        const w = f.w;
-        f.w = f.d;
-        f.d = w;
-      } else if (act === "align") {
-        const hit = nearestWall([f.x, f.z], state.walls, 4);
-        if (!hit) {
-          flash("No wall nearby");
-          return false;
-        }
-        f.rot = Math.atan2(hit.wall.b[1] - hit.wall.a[1], hit.wall.b[0] - hit.wall.a[0]);
-      } else if (act === "realign") {
-        const s = snapTank([f.x, f.z], state);
-        if (!s.valid) {
-          flash(s.reason === "door" ? "Doorway is in the way" : "Needs a clear wall");
-          return false;
-        }
-        f.x = s.x;
-        f.z = s.z;
-        f.rot = s.rot;
-        f.w = s.w;
-        f.d = s.d;
-      } else if (act === "dup") duplicateFurn(f);
-      else if (act === "center") {
-        const room = state.rooms.find((r) => pointInPoly([f.x, f.z], r.points));
-        if (!room) {
-          flash("Not inside a room");
-          return false;
-        }
-        f.x = room.centroid[0];
-        f.z = room.centroid[1];
-      } else if (act === "reset") {
-        const spec = FURN[f.type];
-        if (!spec) return false;
-        f.w = spec.w;
-        f.d = spec.d;
-      } else if (act === "lock") f.locked = !f.locked;
-      else if (act === "hide") {
-        f.hidden = true;
-        state.selection = null;
-      } else if (act === "retype") return changeFurnType(f, ds.type);
-      else if (act === "del") removeFurniture(f.id);
-      else return false;
-    });
-  }
-  function runWall(wall, act) {
-    edit(() => {
-      if (act === "split-half") splitWall(wall, 0.5);
-      else if (act === "split-here") {
-        const t = splitParam(wall);
-        if (t == null) return false;
-        splitWall(wall, t);
-      } else if (act === "straighten") {
-        const aligned = axisAlign(wall.a, wall.b);
-        if (dist(aligned, wall.b) < 1e-4) {
-          flash("Already straight");
-          return false;
-        }
-        wall.b = [...aligned];
-        refitOpenings(wall);
-      } else if (act === "add-door") return addOpeningOn(wall, "door");
-      else if (act === "add-window") return addOpeningOn(wall, "window");
-      else if (act === "del") {
-        state.openings = state.openings.filter((o) => o.wallId !== wall.id);
-        state.walls = state.walls.filter((w) => w.id !== wall.id);
-        state.selection = null;
-      } else return false;
-    });
-  }
-  function runOpening(op, act) {
-    const wall = state.walls.find((w) => w.id === op.wallId);
-    if (!wall) return;
-    edit(() => {
-      if (act === "center-op") op.t = clampOpening(wall, 0.5, op.width);
-      else if (act === "widen") {
-        op.width = Math.max(0.4, wallLen(wall) - 0.24);
-        op.t = clampOpening(wall, 0.5, op.width);
-      } else if (act === "to-window") {
-        op.type = "window";
-        op.height = WIN_H;
-        op.sill = WIN_SILL;
-        op.width = Math.min(Math.max(op.width, 0.6), Math.max(0.5, wallLen(wall) - 0.2));
-        op.t = clampOpening(wall, op.t, op.width);
-      } else if (act === "to-door") {
-        op.type = "door";
-        op.height = DOOR_H;
-        op.sill = 0;
-        op.width = Math.min(DOOR_W, Math.max(0.5, wallLen(wall) - 0.2));
-        op.t = clampOpening(wall, op.t, op.width);
-      } else if (act === "del") {
-        state.openings = state.openings.filter((o) => o.id !== op.id);
-        state.selection = null;
-      } else return false;
-    });
-  }
-  function runRoom(room, act) {
-    if (act === "rename") {
-      state.focusField = "name";
-      inspectorSig = "";
-      render();
-      return;
-    }
-    const plants = state.furniture.filter((f) => f.type === "plant" && pointInPoly([f.x, f.z], room.points));
-    if (!plants.length) {
-      flash("No plants in this room");
-      return;
-    }
-    edit(() => {
-      if (act === "plants-hide") plants.forEach((f) => f.hidden = true);
-      else if (act === "plants-show") plants.forEach((f) => f.hidden = false);
-      else return false;
-    });
-  }
-  function runAction(act, ds) {
-    if (act !== "nudge") hideMenu();
-    const sel = state.selection;
-    const obj = selectedObj();
-    if (!sel || !obj) return;
-    if (sel.kind === "furniture") runFurn(obj, act, ds);
-    else if (sel.kind === "wall") runWall(obj, act);
-    else if (sel.kind === "opening") runOpening(obj, act);
-    else if (sel.kind === "room") runRoom(obj, act);
-  }
   const plan2d = createPlan2D(canvas2d, () => state, actions);
-  let alive = true;
-  let view3dReady = Promise.resolve().then(() => (init_view3d(), view3d_exports)).then((mod) => {
+  Promise.resolve().then(() => (init_view3d(), view3d_exports)).then((mod) => {
     if (!alive) return null;
     view3d = mod.createView3D(canvas3d);
     view3d.setOnRoomClick((id) => {
@@ -38833,6 +40617,7 @@ function mount(root) {
       state.chain = null;
       state.preview = null;
       state.ghost = null;
+      state.draft = null;
       dragging = null;
       state.selection = { kind: hit.kind, id: hit.id };
       state.menuAt = anchorWorld();
@@ -38863,7 +40648,7 @@ function mount(root) {
     }
     if (e.target.closest("#plants-toggle")) {
       const visible = state.furniture.some((f) => f.type === "plant" && !f.hidden);
-      checkpoint();
+      checkpoint(state);
       for (const f of state.furniture) if (f.type === "plant") f.hidden = visible;
       commit();
     }
@@ -38876,15 +40661,14 @@ function mount(root) {
     e.target.value = "";
     if (!file) return;
     try {
-      const data = JSON.parse(await file.text());
-      loadPlan(deserializePlan(data), true);
+      loadPlan(readPlanText(await file.text()), true);
     } catch (err) {
-      const mono = status.querySelector(".mono");
-      if (mono) mono.textContent = err.message || "Could not open file";
+      showError(err.message || "Could not open that file");
     }
   });
   window.addEventListener("keydown", onKey, true);
   window.addEventListener("keyup", onKey, true);
+  window.addEventListener("pagehide", () => persist.persistNow());
   pop.addEventListener("keydown", (e) => e.stopPropagation());
   pop.addEventListener("keyup", (e) => e.stopPropagation());
   pop.addEventListener("keypress", (e) => e.stopPropagation());
@@ -38899,7 +40683,8 @@ function mount(root) {
     const btn = e.target.closest("[data-act]");
     if (!btn) return;
     e.stopPropagation();
-    runAction(btn.dataset.act, btn.dataset);
+    if (btn.dataset.act !== "nudge") hideMenu();
+    commands.runAction(btn.dataset.act, btn.dataset);
   });
   function isTypingTarget(el) {
     if (!(el instanceof Element)) return false;
@@ -38928,6 +40713,8 @@ function mount(root) {
       state.chain = null;
       state.preview = null;
       state.ghost = null;
+      state.draft = null;
+      dragging = null;
       hidePop();
       hideMenu();
       if (menuOpen) {
@@ -38959,8 +40746,15 @@ function mount(root) {
       } else if (state.selection?.kind === "furniture") {
         const f = state.furniture.find((x) => x.id === state.selection.id);
         if (f && f.type !== "tank") {
-          checkpoint();
+          checkpoint(state);
           f.rot = (f.rot || 0) + Math.PI / 2;
+          commit();
+        }
+      } else if (state.selection?.kind === "steps") {
+        const step = state.steps.find((s) => s.id === state.selection.id);
+        if (step) {
+          checkpoint(state);
+          step.rot = (step.rot || 0) + Math.PI / 2;
           commit();
         }
       }
@@ -38968,107 +40762,53 @@ function mount(root) {
     if (e.key === "Delete" || e.key === "Backspace") {
       if (state.selection?.kind === "wall") {
         const id = state.selection.id;
-        checkpoint();
+        checkpoint(state);
         state.openings = state.openings.filter((o) => o.wallId !== id);
         state.walls = state.walls.filter((w) => w.id !== id);
         state.selection = null;
         refreshRooms();
         commit();
       } else if (state.selection?.kind === "opening") {
-        checkpoint();
+        checkpoint(state);
         state.openings = state.openings.filter((o) => o.id !== state.selection.id);
         state.selection = null;
         commit();
       } else if (state.selection?.kind === "furniture") {
-        checkpoint();
-        removeFurniture(state.selection.id);
+        checkpoint(state);
+        commands.removeFurniture(state.selection.id);
         commit();
+      } else if (["deck", "steps", "stump"].includes(state.selection?.kind)) {
+        commands.deleteHit(state.selection);
       }
     }
     const map = { v: "select", w: "wall", d: "door", n: "window" };
     if (map[e.key.toLowerCase()] && !e.metaKey && !e.ctrlKey) setTool(map[e.key.toLowerCase()]);
   }
   document.addEventListener("pointerdown", (e) => {
-    if (!pop.hidden && !pop.contains(e.target) && !e.target.closest("#gen-btn, #file-btn, [data-tool=room]")) {
-      hidePop();
-    }
+    if (!pop.hidden && !pop.contains(e.target) && !e.target.closest("#gen-btn, #file-btn, [data-tool=room]")) hidePop();
     const menu = $("#ctx-menu");
     if (menu && !menu.hidden && !menu.contains(e.target) && !e.target.closest("#insp-more")) hideMenu();
   });
   let saved = null;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) saved = deserializePlan(JSON.parse(raw));
+    if (raw) saved = readPlanText(raw);
   } catch {
     saved = null;
   }
   if (saved?.walls?.length) loadPlan(saved, false);
   else loadPlan(familyPlan(), false);
-  void PRESETS;
   return () => {
     alive = false;
     clearTimeout(flashTimer);
+    clearTimeout(toastTimer);
+    persist.persistNow();
     window.removeEventListener("keydown", onKey, true);
     window.removeEventListener("keyup", onKey, true);
     plan2d.dispose();
     view3d?.dispose();
     root.innerHTML = "";
   };
-}
-function shellHtml() {
-  return `
-  <div class="app">
-    <header class="toolbar">
-      <div class="brand">
-        <span class="mark" aria-hidden="true"></span>
-        <div class="titles">
-          <strong>Neeky</strong>
-          <span>Home Designer</span>
-        </div>
-      </div>
-      <div class="group">
-        ${toolBtn("select", "Select", ICONS.select)}
-        ${toolBtn("wall", "Wall", ICONS.wall)}
-        ${toolBtn("door", "Door", ICONS.door)}
-        ${toolBtn("window", "Window", ICONS.window)}
-        ${toolBtn("room", "Room name", ICONS.room)}
-        ${toolBtn("delete", "Delete", ICONS.del)}
-      </div>
-      <button type="button" class="tool" id="furnish-btn" title="Furnish">${ICONS.furnish}<span>Furnish</span></button>
-      <button type="button" class="tool" id="gen-btn" title="Generate">${ICONS.gen}<span>Generate</span></button>
-      <div class="group view-group">
-        <button type="button" class="tool" data-view="split">Split</button>
-        <button type="button" class="tool" data-view="plan">Plan</button>
-        <button type="button" class="tool" data-view="model">3D</button>
-        <button type="button" class="tool" data-view="top">Top</button>
-      </div>
-      <div class="group">
-        <button type="button" class="tool" id="undo-btn" title="Undo">${ICONS.undo}</button>
-        <button type="button" class="tool" id="redo-btn" title="Redo">${ICONS.redo}</button>
-        <button type="button" class="tool" id="file-btn" title="File">${ICONS.file}</button>
-      </div>
-    </header>
-    <aside class="palette" id="palette">
-      <p class="pop-title">Furnish</p>
-      <div class="furn-grid" id="furn-grid"></div>
-      <button type="button" class="plants-toggle" id="plants-toggle">Hide plants</button>
-      <p class="dim-note">Drag onto the plan. Select anything to edit it. Right-click, or Tools, for more.</p>
-    </aside>
-    <div class="stage">
-      <div class="pane plan-pane">
-        <canvas id="plan-canvas"></canvas>
-      </div>
-      <div class="pane view-pane"><canvas id="view-canvas"></canvas></div>
-    </div>
-    <footer class="status" id="status"></footer>
-    <div id="inspector" class="inspector" hidden></div>
-    <div id="ctx-menu" class="ctx-menu" hidden role="menu"></div>
-    <div id="popover" class="popover" hidden></div>
-    <input id="file-in" type="file" accept="application/json,.json" hidden />
-  </div>`;
-}
-function toolBtn(id, label, icon) {
-  return `<button type="button" class="tool" data-tool="${id}" title="${label}" aria-label="${label}">${icon}</button>`;
 }
 
 // js/main.js
@@ -39084,7 +40824,6 @@ export {
  * Copyright 2010-2024 Three.js Authors
  * SPDX-License-Identifier: MIT
  */
-
-    </script>
+</script>
   </body>
 </html>
