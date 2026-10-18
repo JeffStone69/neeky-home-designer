@@ -10,6 +10,7 @@ import {
   sceneBounds,
   wallLen,
 } from "./geom.js";
+import { equipmentCorners, powerSheetLines } from "./power.js";
 
 const A3 = { w: 420, h: 297 };
 
@@ -42,6 +43,15 @@ export function planEntities(state) {
       void ang;
       line("STEPS", along, along2);
     }
+  }
+  for (const eq of state.equipment || []) {
+    const pts = equipmentCorners(eq);
+    const w = Math.abs(pts[2][0] - pts[0][0]);
+    const d = Math.abs(pts[2][1] - pts[0][1]);
+    if (w < 0.05 || d < 0.05) continue;
+    const layer = eq.kind === "array" ? "ARRAY" : String(eq.kind || "power").toUpperCase();
+    poly(layer, pts);
+    text("LABELS", [(pts[0][0] + pts[2][0]) / 2, (pts[0][1] + pts[2][1]) / 2], eq.name || eq.kind || "Power", 0.18);
   }
   for (const s of state.stumps || []) {
     const h = (s.size || 0.15) / 2;
@@ -154,6 +164,13 @@ export function layoutSheet(state, opts = {}) {
   stroke([[margin / 2, margin / 2], [paperW - margin / 2, margin / 2], [paperW - margin / 2, paperH - margin / 2], [margin / 2, paperH - margin / 2], [margin / 2, margin / 2]], "#d4cdc0", 0.3);
 
   for (const e of entities) {
+    if (e.kind === "poly" && e.layer === "ARRAY") {
+      const pts = e.pts.map(map);
+      fill(pts, "#d5e6dc");
+      strokeClosed(pts, "#2f5d50", 0.4);
+    }
+  }
+  for (const e of entities) {
     if (e.kind === "poly" && (e.layer === "DECK" || e.layer === "VERANDA")) {
       const pts = e.pts.map(map);
       fill(pts, e.layer === "VERANDA" ? "#e4ebe6" : "#e7dcc8");
@@ -167,6 +184,13 @@ export function layoutSheet(state, opts = {}) {
       strokeClosed(pts, "#6b6459", 0.3);
     } else if (e.kind === "line" && e.layer === "STEPS") {
       stroke([map(e.a), map(e.b)], "#6b6459", 0.25);
+    }
+  }
+  for (const e of entities) {
+    if (e.kind === "poly" && ["BATTERY", "INVERTER", "CHARGER", "GENERATOR"].includes(e.layer)) {
+      const pts = e.pts.map(map);
+      fill(pts, "#2f5d50");
+      strokeClosed(pts, "#1c1917", 0.3);
     }
   }
   for (const e of entities) {
@@ -239,6 +263,37 @@ export function layoutSheet(state, opts = {}) {
     [date ? `Date ${date}` : "Offline sheet", 400],
   ];
   rows.forEach((row, i) => label(tbx + 3, tby + 6 + i * 5.6, row[0], 3.1, "start", row[1]));
+
+  const powerLines = powerSheetLines(state.power, state.equipment);
+  if (powerLines.length) {
+    const rowH = 3.8;
+    const boxW = titleW;
+    const boxH = powerLines.length * rowH + 2.4;
+    const x0 = tbx;
+    const y1 = tby - 3;
+    const y0 = y1 - boxH;
+    fill(
+      [
+        [x0, y0],
+        [x0 + boxW, y0],
+        [x0 + boxW, y1],
+        [x0, y1],
+      ],
+      "#efeae0",
+    );
+    stroke(
+      [
+        [x0, y0],
+        [x0 + boxW, y0],
+        [x0 + boxW, y1],
+        [x0, y1],
+        [x0, y0],
+      ],
+      "#1c1917",
+      0.35,
+    );
+    powerLines.forEach((text, i) => label(x0 + 2, y0 + 2.6 + i * rowH, text, 2.45, "start", i === 0 ? 600 : 400));
+  }
   return { w: paperW, h: paperH, scale, items };
 }
 

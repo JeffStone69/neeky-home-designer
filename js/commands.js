@@ -9,6 +9,7 @@ import {
   WIN_W,
 } from "./constants.js";
 import { normalizeDeck, stumpGrid } from "./elements.js";
+import { ARRAY_TILT, EQUIP, defaultPower, normalizeEquip } from "./power.js";
 import {
   FURN,
   cloneFurn,
@@ -126,6 +127,12 @@ export function createCommands(state, api) {
       api.checkpoint();
       removeSite(hit.kind, hit.id);
       api.commit();
+      return;
+    }
+    if (hit.kind === "equipment") {
+      api.checkpoint();
+      removeEquip(hit.id);
+      api.commit();
     }
   }
 
@@ -134,6 +141,16 @@ export function createCommands(state, api) {
     if (kind === "steps") state.steps = state.steps.filter((d) => d.id !== id);
     if (kind === "stump") state.stumps = state.stumps.filter((d) => d.id !== id);
     if (state.selection?.kind === kind && state.selection.id === id) state.selection = null;
+  }
+
+  function removeEquip(id) {
+    state.equipment = (state.equipment || []).filter((e) => e.id !== id);
+    if (state.selection?.kind === "equipment" && state.selection.id === id) state.selection = null;
+  }
+
+  function markPower() {
+    if (!state.power) state.power = defaultPower();
+    state.power.configured = true;
   }
 
   function placeDeck(draft) {
@@ -166,6 +183,48 @@ export function createCommands(state, api) {
       going: 0.28,
     });
     state.selection = { kind: "steps", id: state.steps.at(-1).id };
+  }
+
+  function placeArray(draft) {
+    const d = normalizeEquip(draft);
+    if (d.w < 0.6 || d.d < 0.6) return false;
+    markPower();
+    state.equipment.push({
+      id: uid("eq"),
+      kind: "array",
+      name: EQUIP.array.label,
+      mount: "ground",
+      x: d.x,
+      z: d.z,
+      w: d.w,
+      d: d.d,
+      tilt: ARRAY_TILT,
+      azimuth: 0,
+    });
+    state.selection = { kind: "equipment", id: state.equipment.at(-1).id };
+    return true;
+  }
+
+  function placeEquip(kind, world) {
+    const spec = EQUIP[kind];
+    if (!spec || kind === "array") return false;
+    const g = state.alt ? SNAP_FINE : state.snap;
+    const p = snapPt(world, g);
+    markPower();
+    state.equipment.push({
+      id: uid("eq"),
+      kind,
+      name: spec.label,
+      mount: "ground",
+      x: p[0] - spec.w / 2,
+      z: p[1] - spec.d / 2,
+      w: spec.w,
+      d: spec.d,
+      tilt: 0,
+      azimuth: 0,
+    });
+    state.selection = { kind: "equipment", id: state.equipment.at(-1).id };
+    return true;
   }
 
   function placeStump(world) {
@@ -492,6 +551,20 @@ export function createCommands(state, api) {
     });
   }
 
+  function runEquip(obj, act) {
+    edit(() => {
+      if (act === "del") {
+        removeEquip(obj.id);
+        return;
+      }
+      if (act === "mount-ground" || act === "mount-deck" || act === "mount-flat") {
+        obj.mount = act.slice("mount-".length);
+        return;
+      }
+      return false;
+    });
+  }
+
   function runSite(obj, act) {
     edit(() => {
       if (act === "del") {
@@ -520,6 +593,7 @@ export function createCommands(state, api) {
     else if (sel.kind === "opening") runOpening(obj, act);
     else if (sel.kind === "room") runRoom(obj, act);
     else if (sel.kind === "deck" || sel.kind === "steps" || sel.kind === "stump") runSite(obj, act);
+    else if (sel.kind === "equipment") runEquip(obj, act);
   }
 
   return {
@@ -532,6 +606,8 @@ export function createCommands(state, api) {
     placeDeck,
     placeSteps,
     placeStump,
+    placeArray,
+    placeEquip,
     fillStumps,
     setWallLength,
     refitOpenings,

@@ -90,7 +90,7 @@ test("v1 Belli Park file migrates, normalises, and keeps four rooms", () => {
   const back = normalizePlan(importPlanData(again));
   assert.equal(back.rooms.length, 4);
   assert.equal(back.version, undefined);
-  assert.equal(again.version, 2);
+  assert.equal(again.version, 3);
   assert.equal(again.decks.length, 0);
   const openings = back.openings.length;
   assert.equal(openings, original.openings.length);
@@ -211,7 +211,7 @@ test("unreadable autosave is kept and not overwritten until released", async () 
   state.title = "edited";
   persist.persistNow();
   const written = JSON.parse(storage.getItem(STORAGE_KEY));
-  assert.equal(written.version, 2);
+  assert.equal(written.version, 3);
   assert.equal(written.title, "edited");
   assert.equal(storage.getItem(STORAGE_BACKUP_KEY), raw);
   const migrated = readAutosave(JSON.stringify({ app: "neeky-home-designer", walls: raw && JSON.parse(raw).walls }));

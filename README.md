@@ -38,13 +38,19 @@ Do not open `index.html` by double-click. The editable source uses JavaScript mo
 
 Plans autosave in this browser (`localStorage`, key `neeky-home-designer-v2`). A different browser, or the double-clicked file versus the local server, keeps a separate plan. If a saved plan cannot be read, the raw copy stays under `neeky-home-designer-v2-unreadable` and is not replaced until you edit or open another file.
 
-**Plan file → Save JSON** downloads `neeky-plan.json` (schema 2). **Open JSON** checks the file, migrates older plans, and repairs T-junctions before drawing. **Download .glb** saves the current 3D house. **Plan SVG** and **Plan PDF** are drawn at 1:50 or 1:100, on A3 when the plan fits and on a larger sheet at that same scale when it does not, with dimensions, a north arrow, and a title block. **DXF** is the same drawing in metres for CAD.
+**Plan file → Save JSON** downloads `neeky-plan.json` (schema 3). **Open JSON** checks the file, migrates older plans, and repairs T-junctions before drawing. **Download .glb** saves the current 3D house. **Plan SVG** and **Plan PDF** are drawn at 1:50 or 1:100, on A3 when the plan fits and on a larger sheet at that same scale when it does not, with dimensions, a north arrow, and a title block. **DXF** is the same drawing in metres for CAD.
 
 The status strip switches dimensions between **outside** faces, **inside** faces, and wall **centrelines**, and always shows gross floor area (outside faces). North is up on the plan.
 
 ## Generate
 
 **Generate** is local and deterministic. Type a brief (`2 bedroom apartment, 75 m², open living kitchen`) or pick Studio / Two-bed / Family. Tick **Plants, Sofa, Bed, Table, Blue-tongue** to place those pieces. First visit loads the Family 160 m² plan.
+
+## Solar
+
+**Solar** sizes an off-grid or hybrid system from daily energy (typed in, or watts × hours), peak sun hours, battery days, losses, panel wattage, and the area you can fill. It reports panel count, array output, battery kilowatt-hours, inverter kilowatts, and a backup generator. Tick an EV charger (for example 7 kW) to include that load. Place the array, battery, inverter, charger, and generator on the plan. They are saved in the file and drawn as simple boxes in 3D. There is no roof model yet, so an array sits on the ground, on a deck, or on a flat area.
+
+The plan SVG and PDF include the estimate. It is a planning figure only. A licensed electrician or CEC-accredited designer has to confirm it before anything is bought or installed.
 
 ## Furniture
 

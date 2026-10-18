@@ -26,16 +26,21 @@ import { downloadBlob, downloadText, exportSheet, readPlanText } from "./io.js";
 import { createPlan2D } from "./plan2d.js";
 import { objectBy, pickHit, selectedObj } from "./pick.js";
 import {
+  applianceRowHtml,
   escapeHtml,
   inspField,
   kickerFor,
   menuHtml,
+  mountField,
   nameField,
   paletteHtml,
   roomAreaText,
   shellHtml,
+  solarFormHtml,
+  solarResultHtml,
   statusBarHtml,
 } from "./panels.js";
+import { EQUIP, MOUNTS, TINY_HOME_APPLIANCES, clonePower, powerInspectorText, powerStatusLine, sizePower } from "./power.js";
 import { serializePlan } from "./schema.js";
 import { applySnapshot, checkpoint, createPersist, createState, keepUnreadableAutosave, readAutosave, snapshot } from "./store.js";
 
@@ -140,6 +145,8 @@ export function mount(root) {
       decks: plan.decks || [],
       steps: plan.steps || [],
       stumps: plan.stumps || [],
+      equipment: plan.equipment || [],
+      power: plan.power,
       title: plan.title || "",
     });
     state.walls = norm.walls;
@@ -151,6 +158,8 @@ export function mount(root) {
     state.decks = (norm.decks || []).map((d) => ({ ...d }));
     state.steps = (norm.steps || []).map((s) => ({ ...s }));
     state.stumps = (norm.stumps || []).map((s) => ({ ...s }));
+    state.equipment = (norm.equipment || []).map((e) => ({ ...e }));
+    state.power = clonePower(norm.power);
     state.title = plan.title || "";
     if (plan.dimMode) state.dimMode = plan.dimMode;
     state.chain = null;
@@ -202,6 +211,17 @@ export function mount(root) {
       }
       if (state.tool === "stumps") {
         commands.edit(() => commands.placeStump(world));
+        return;
+      }
+      if (state.tool === "array") {
+        const p = snapPt(world, g);
+        state.draft = { type: "array", kind: "array", x: p[0], z: p[1], w: 0, d: 0, azimuth: 0 };
+        dragging = { type: "array" };
+        render();
+        return;
+      }
+      if (EQUIP[state.tool] && state.tool !== "array") {
+        commands.edit(() => commands.placeEquip(state.tool, world));
         return;
       }
       if (state.tool === "wall") {
@@ -270,6 +290,14 @@ export function mount(root) {
         render();
         return;
       }
+      if (hit?.kind === "equipment") {
+        const eq = state.equipment.find((e) => e.id === hit.id);
+        state.selection = { kind: "equipment", id: hit.id };
+        checkpoint(state);
+        dragging = { type: "move-equip", id: hit.id, dx: world[0] - eq.x, dz: world[1] - eq.z };
+        render();
+        return;
+      }
       if (hit?.kind === "deck") {
         const deck = state.decks.find((d) => d.id === hit.id);
         state.selection = { kind: "deck", id: hit.id };
@@ -319,6 +347,22 @@ export function mount(root) {
         state.draft.w = p[0] - state.draft.x;
         state.draft.d = p[1] - state.draft.z;
         plan2d.draw();
+        return;
+      }
+      if (dragging?.type === "array" && state.draft) {
+        const p = snapPt(world, g);
+        state.draft.w = p[0] - state.draft.x;
+        state.draft.d = p[1] - state.draft.z;
+        plan2d.draw();
+        return;
+      }
+      if (dragging?.type === "move-equip") {
+        const eq = state.equipment.find((e) => e.id === dragging.id);
+        if (!eq) return;
+        const p = snapPt([world[0] - dragging.dx, world[1] - dragging.dz], g);
+        eq.x = p[0];
+        eq.z = p[1];
+        render();
         return;
       }
       if (state.chain) {
@@ -402,6 +446,17 @@ export function mount(root) {
         } else render();
         return;
       }
+      if (dragging?.type === "array") {
+        const draft = state.draft;
+        state.draft = null;
+        dragging = null;
+        if (draft && Math.abs(draft.w) >= 0.6 && Math.abs(draft.d) >= 0.6) {
+          checkpoint(state);
+          commands.placeArray(draft);
+          commit();
+        } else render();
+        return;
+      }
       if (dragging?.type === "place") {
         if (state.ghost?.valid) {
           checkpoint(state);
@@ -442,11 +497,11 @@ export function mount(root) {
       openMenu(client.x, client.y);
     },
     doubleClick(world, screen) {
-      if (["wall", "door", "window", "delete", "furnish", "deck", "steps", "stumps"].includes(state.tool)) return false;
+      if (["wall", "door", "window", "delete", "furnish", "deck", "steps", "stumps", "array", "battery", "inverter", "charger", "generator"].includes(state.tool)) return false;
       const hit = pick(world, screen);
       if (!hit || hit.kind === "handle") return false;
       state.selection = { kind: hit.kind, id: hit.id };
-      state.focusField = hit.kind === "wall" ? "len" : hit.kind === "opening" ? "width" : "name";
+      state.focusField = hit.kind === "wall" ? "len" : hit.kind === "opening" ? "width" : hit.kind === "equipment" ? "w" : "name";
       state.tool = "select";
       hideMenu();
       render();
@@ -494,6 +549,10 @@ export function mount(root) {
     } else if (state.tool === "deck") extra = " · drag a deck rectangle";
     else if (state.tool === "steps") extra = " · click to place steps";
     else if (state.tool === "stumps") extra = " · click to place a stump";
+    else if (state.tool === "array") extra = " · drag the array rectangle";
+    else if (EQUIP[state.tool]) extra = ` · click to place the ${EQUIP[state.tool].label.toLowerCase()}`;
+    const solar = powerStatusLine(state.power, state.equipment);
+    if (solar) extra += ` · ${solar}`;
     if (state.note) extra += ` · ${state.note}`;
     const summary = `${state.rooms.length} rooms · net ${fmtArea(net)} · GFA ${fmtArea(gfa)}${extra}`;
     const toolName = {
@@ -507,6 +566,11 @@ export function mount(root) {
       deck: "Deck",
       steps: "Steps",
       stumps: "Stumps",
+      array: "Solar array",
+      battery: "Battery",
+      inverter: "Inverter",
+      charger: "EV charger",
+      generator: "Generator",
     }[state.tool];
     status.innerHTML = statusBarHtml({
       snap: state.snap.toFixed(2),
@@ -548,6 +612,10 @@ export function mount(root) {
       btn.classList.toggle("active", btn.dataset.view === state.view);
     });
     $("#furnish-btn")?.classList.toggle("active", state.tool === "furnish");
+    $("#solar-btn")?.classList.toggle(
+      "active",
+      ["array", "battery", "inverter", "charger", "generator"].includes(state.tool) || (!pop.hidden && !!pop.querySelector("#solar-form")),
+    );
     root.querySelectorAll("[data-furn]").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.furn === state.furnish);
     });
@@ -606,6 +674,7 @@ export function mount(root) {
   function hidePop() {
     pop.hidden = true;
     pop.innerHTML = "";
+    pop.classList.remove("solar-open");
   }
 
   function showPop(anchor, html, width = 320) {
@@ -779,6 +848,116 @@ export function mount(root) {
     requestAnimationFrame(() => area.focus({ preventScroll: false }));
   }
 
+  function readNum(form, name, fallback) {
+    const raw = form.elements[name]?.value;
+    if (raw == null || String(raw).trim() === "") return fallback;
+    const n = Number(String(raw).trim().replace(/,/g, "."));
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  function readSolar(form, prev) {
+    const source = form.querySelector("[data-source].active")?.dataset.source === "appliances" ? "appliances" : "typed";
+    const appliances = [...form.querySelectorAll("#solar-app-list .solar-app")]
+      .map((row) => {
+        const name = row.querySelector("[data-k=name]")?.value.trim() || "";
+        const wattsRaw = row.querySelector("[data-k=watts]")?.value.trim() || "";
+        const hoursRaw = row.querySelector("[data-k=hours]")?.value.trim() || "";
+        return { name, wattsRaw, hoursRaw };
+      })
+      .filter((a) => a.name || a.wattsRaw || a.hoursRaw)
+      .map((a) => ({
+        name: a.name,
+        watts: Number(a.wattsRaw.replace(/,/g, ".")) || 0,
+        hours: Number(a.hoursRaw.replace(/,/g, ".")) || 0,
+      }));
+    return clonePower({
+      ...prev,
+      configured: true,
+      source,
+      dailyKwh: Math.max(0, readNum(form, "dailyKwh", 0)),
+      appliances,
+      peakSunHours: Math.max(0, readNum(form, "peakSunHours", prev.peakSunHours)),
+      autonomyDays: Math.max(0, readNum(form, "autonomyDays", prev.autonomyDays)),
+      losses: clamp(readNum(form, "lossesPct", prev.losses * 100), 0, 100) / 100,
+      panelW: Math.max(0, readNum(form, "panelW", prev.panelW)),
+      panelArea: Math.max(0, readNum(form, "panelArea", prev.panelArea)),
+      availableArea: Math.max(0, readNum(form, "availableArea", prev.availableArea)),
+      dod: clamp(readNum(form, "dodPct", prev.dod * 100), 0, 100) / 100,
+      includeEv: !!form.elements.includeEv?.checked,
+      evKw: Math.max(0, readNum(form, "evKw", prev.evKw)),
+      evHours: clamp(readNum(form, "evHours", prev.evHours), 0, 24),
+    });
+  }
+
+  function solarPopover(anchor) {
+    if (!state.power?.configured) {
+      checkpoint(state);
+      state.power = clonePower({ ...state.power, configured: true });
+      persist.persist();
+    }
+    const refreshResult = () => {
+      const el = pop.querySelector("#solar-result");
+      if (el) el.innerHTML = solarResultHtml(sizePower(state.power));
+    };
+    showPop(anchor, solarFormHtml(state.power, solarResultHtml(sizePower(state.power))), 420);
+    pop.classList.add("solar-open");
+    const form = pop.querySelector("#solar-form");
+    const apply = () => {
+      state.power = readSolar(form, state.power);
+      refreshResult();
+      updateStatus();
+      persist.persist();
+    };
+    form.addEventListener("submit", (e) => e.preventDefault());
+    form.addEventListener("input", apply);
+    form.addEventListener("change", apply);
+    form.querySelectorAll("[data-source]").forEach((b) => {
+      b.addEventListener("click", () => {
+        form.querySelectorAll("[data-source]").forEach((x) => x.classList.toggle("active", x === b));
+        const mode = b.dataset.source;
+        const apps = form.querySelector("#solar-apps");
+        const typed = form.querySelector("#solar-typed");
+        if (apps) apps.hidden = mode !== "appliances";
+        if (typed) typed.hidden = mode !== "typed";
+        if (mode === "appliances" && !form.querySelector("#solar-app-list .solar-app")) {
+          const list = form.querySelector("#solar-app-list");
+          list.innerHTML = TINY_HOME_APPLIANCES.map((a) => applianceRowHtml(a)).join("");
+        }
+        apply();
+      });
+    });
+    form.addEventListener("click", (e) => {
+      if (e.target.closest("[data-act=add-app]")) {
+        e.preventDefault();
+        form.querySelector("#solar-app-list").insertAdjacentHTML("beforeend", applianceRowHtml());
+        return;
+      }
+      const rm = e.target.closest("[data-act=remove-app]");
+      if (rm) {
+        rm.closest(".solar-app")?.remove();
+        apply();
+        return;
+      }
+      if (e.target.closest("[data-act=use-arrays]")) {
+        const area = (state.equipment || [])
+          .filter((eq) => eq.kind === "array")
+          .reduce((sum, eq) => sum + Math.abs(eq.w) * Math.abs(eq.d), 0);
+        if (area < 0.1) {
+          flash("Draw an array first");
+          return;
+        }
+        form.elements.availableArea.value = (Math.round(area * 100) / 100).toFixed(2);
+        apply();
+        return;
+      }
+      const place = e.target.closest("[data-place]");
+      if (!place) return;
+      apply();
+      setTool(place.dataset.place);
+    });
+    updateStatus();
+  }
+
   function filePopover(anchor) {
     showPop(
       anchor,
@@ -849,9 +1028,9 @@ export function mount(root) {
     if (!sel || !obj) return null;
     if (sel.kind === "furniture") return [obj.x, obj.z];
     if (sel.kind === "stump" || sel.kind === "steps") return [obj.x, obj.z];
-    if (sel.kind === "deck") {
-      const d = normalizeDeck(obj);
-      return [d.x + d.w / 2, d.z + d.d / 2];
+    if (sel.kind === "deck" || sel.kind === "equipment") {
+      const d = sel.kind === "deck" ? normalizeDeck(obj) : obj;
+      return [d.x + Math.abs(d.w) / 2, d.z + Math.abs(d.d) / 2];
     }
     if (sel.kind === "wall") return [(obj.a[0] + obj.b[0]) / 2, (obj.a[1] + obj.b[1]) / 2];
     if (sel.kind === "room") return obj.centroid;
@@ -880,13 +1059,14 @@ export function mount(root) {
     if (sel.kind === "deck") return `deck:${obj.id}:${obj.kind}`;
     if (sel.kind === "steps") return `steps:${obj.id}`;
     if (sel.kind === "stump") return `stump:${obj.id}`;
+    if (sel.kind === "equipment") return `eq:${obj.id}:${obj.kind}:${obj.mount}`;
     return "";
   }
 
   function fieldValue(obj, field) {
     const sel = state.selection;
     if (field === "name") {
-      if (sel?.kind === "room" || sel?.kind === "deck") return obj.name || "";
+      if (sel?.kind === "room" || sel?.kind === "deck" || sel?.kind === "equipment") return obj.name || "";
       return obj.name || (obj.type === "tank" ? "Blue-tongue" : FURN[obj.type]?.label || "");
     }
     if (field === "len") return fmtNum(wallLen(obj));
@@ -899,6 +1079,8 @@ export function mount(root) {
     if (field === "count") return String(obj.count || 0);
     if (field === "going") return fmtNum(obj.going);
     if (field === "size") return fmtNum(obj.size);
+    if (field === "tilt" || field === "azimuth") return String(Math.round(Number(obj[field]) || 0));
+    if (field === "mount") return obj.mount || "ground";
     return "";
   }
 
@@ -914,8 +1096,16 @@ export function mount(root) {
         obj.name = text || (obj.kind === "veranda" ? "Veranda" : "Deck");
         return;
       }
+      if (kind === "equipment") {
+        obj.name = text || EQUIP[obj.kind]?.label || "Equipment";
+        return;
+      }
       const fallback = obj.type === "tank" ? "Blue-tongue" : FURN[obj.type]?.label || "";
       obj.name = !text || text === fallback ? "" : text;
+      return;
+    }
+    if (kind === "equipment" && field === "mount") {
+      if (MOUNTS.includes(raw)) obj.mount = raw;
       return;
     }
     const n = typeof raw === "number" ? raw : parseLen(raw);
@@ -953,6 +1143,12 @@ export function mount(root) {
       obj.size = clamp(n, 0.08, 0.45);
       return;
     }
+    if (kind === "equipment") {
+      if (field === "w" || field === "d") obj[field] = clamp(n, obj.kind === "array" ? 0.6 : 0.15, obj.kind === "array" ? 40 : 4);
+      else if (field === "tilt") obj.tilt = clamp(n, 0, 90);
+      else if (field === "azimuth") obj.azimuth = ((n % 360) + 360) % 360;
+      return;
+    }
     if (kind !== "furniture") return;
     if (field === "dia") {
       const d = clamp(n, 0.15, 1.8);
@@ -980,6 +1176,16 @@ export function mount(root) {
       return [inspField("width", "Width m", fieldValue(obj, "width")), inspField("count", "Risers", fieldValue(obj, "count")), inspField("going", "Going m", fieldValue(obj, "going"), true)].join("");
     }
     if (sel.kind === "stump") return inspField("size", "Size m", fieldValue(obj, "size"), true);
+    if (sel.kind === "equipment") {
+      const bits = [nameField(obj.name || ""), inspField("w", "Width m", fieldValue(obj, "w")), inspField("d", "Depth m", fieldValue(obj, "d"))];
+      if (obj.kind === "array") {
+        bits.push(mountField(obj.mount || "ground"));
+        bits.push(inspField("tilt", "Tilt °", fieldValue(obj, "tilt")));
+        bits.push(inspField("azimuth", "Azimuth °", fieldValue(obj, "azimuth"), true));
+      }
+      bits.push(`<p class="insp-read">${escapeHtml(powerInspectorText(state.power))}</p>`);
+      return bits.join("");
+    }
     if (obj.type === "tank") return `${nameField(fieldValue(obj, "name"))}<p class="insp-read">1.80 × 0.60 m · snaps to a wall</p>`;
     if (obj.type === "plant") return `${nameField(fieldValue(obj, "name"))}${inspField("dia", "Diameter m", fieldValue(obj, "dia"), true)}`;
     return [
@@ -1171,6 +1377,11 @@ export function mount(root) {
         state.selection = { kind: "furniture", id };
         render();
       });
+      view3d.setOnEquipClick((id) => {
+        hideMenu();
+        state.selection = { kind: "equipment", id };
+        render();
+      });
       view3d.setOnContext((hit, x, y) => {
         if (!hit) {
           hideMenu();
@@ -1202,6 +1413,7 @@ export function mount(root) {
     const view = e.target.closest("[data-view]");
     if (view) setView(view.dataset.view);
     if (e.target.closest("#gen-btn")) genPopover(e.target.closest("#gen-btn"));
+    if (e.target.closest("#solar-btn")) solarPopover(e.target.closest("#solar-btn"));
     if (e.target.closest("#furnish-btn")) setTool(state.tool === "furnish" ? "select" : "furnish");
     const furn = e.target.closest("[data-furn]");
     if (furn) {
@@ -1350,7 +1562,7 @@ export function mount(root) {
         checkpoint(state);
         commands.removeFurniture(state.selection.id);
         commit();
-      } else if (["deck", "steps", "stump"].includes(state.selection?.kind)) {
+      } else if (["deck", "steps", "stump", "equipment"].includes(state.selection?.kind)) {
         commands.deleteHit(state.selection);
       }
     }
@@ -1359,7 +1571,7 @@ export function mount(root) {
   }
 
   document.addEventListener("pointerdown", (e) => {
-    if (!pop.hidden && !pop.contains(e.target) && !e.target.closest("#gen-btn, #file-btn, [data-tool=room]")) hidePop();
+    if (!pop.hidden && !pop.contains(e.target) && !e.target.closest("#gen-btn, #solar-btn, #file-btn, [data-tool=room]")) hidePop();
     const menu = $("#ctx-menu");
     if (menu && !menu.hidden && !menu.contains(e.target) && !e.target.closest("#insp-more")) hideMenu();
   });

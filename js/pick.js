@@ -1,6 +1,7 @@
 import { containsPoint } from "./furniture.js";
 import { nearestWall, pointInPoly, wallLen } from "./geom.js";
 import { pointInDeck, pointInStep } from "./elements.js";
+import { pointInEquipment } from "./power.js";
 
 export function selectedObj(state) {
   const sel = state.selection;
@@ -12,6 +13,7 @@ export function selectedObj(state) {
   if (sel.kind === "deck") return (state.decks || []).find((d) => d.id === sel.id) || null;
   if (sel.kind === "steps") return (state.steps || []).find((s) => s.id === sel.id) || null;
   if (sel.kind === "stump") return (state.stumps || []).find((s) => s.id === sel.id) || null;
+  if (sel.kind === "equipment") return (state.equipment || []).find((e) => e.id === sel.id) || null;
   return null;
 }
 
@@ -23,6 +25,7 @@ export function objectBy(state, kind, id) {
   if (kind === "deck") return (state.decks || []).find((d) => d.id === id) || null;
   if (kind === "steps") return (state.steps || []).find((s) => s.id === id) || null;
   if (kind === "stump") return (state.stumps || []).find((s) => s.id === id) || null;
+  if (kind === "equipment") return (state.equipment || []).find((e) => e.id === id) || null;
   return null;
 }
 
@@ -66,6 +69,10 @@ export function pickHit(state, world, screen, view) {
     const q = [a[0] + dx * t, a[1] + dz * t];
     if (Math.hypot(world[0] - q[0], world[1] - q[1]) < openTol) return { kind: "opening", id: op.id };
   }
+  for (const eq of state.equipment || []) {
+    if (eq.kind === "array") continue;
+    if (pointInEquipment(world, eq)) return { kind: "equipment", id: eq.id };
+  }
   for (const s of state.stumps || []) {
     const r = Math.max(0.12, (s.size || 0.15) / 2) + (coarse ? 0.12 : 0.04);
     if (Math.hypot(world[0] - s.x, world[1] - s.z) <= r) return { kind: "stump", id: s.id };
@@ -75,6 +82,10 @@ export function pickHit(state, world, screen, view) {
   }
   const nw = nearestWall(world, state.walls, wallTol);
   if (nw) return { kind: "wall", id: nw.wall.id };
+  for (const eq of state.equipment || []) {
+    if (eq.kind !== "array") continue;
+    if (pointInEquipment(world, eq)) return { kind: "equipment", id: eq.id };
+  }
   for (const d of state.decks || []) {
     if (pointInDeck(world, d)) return { kind: "deck", id: d.id };
   }

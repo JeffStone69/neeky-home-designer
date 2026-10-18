@@ -146,12 +146,14 @@
 }
 
 #gen-btn span,
+#solar-btn span,
 #furnish-btn span {
   display: none;
 }
 
 @media (min-width: 960px) {
   #gen-btn span,
+  #solar-btn span,
   #furnish-btn span {
     display: inline;
   }
@@ -250,6 +252,10 @@
 .popover label {
   user-select: text;
   -webkit-user-select: text;
+}
+
+.popover.solar-open {
+  max-height: min(860px, calc(100dvh - 72px));
 }
 
 .popover {
@@ -773,8 +779,121 @@
   outline: none;
 }
 
-.insp-field input:focus {
+.insp-field input:focus,
+.insp-field select:focus {
   box-shadow: 0 0 0 2px rgb(47 93 80 / 0.25);
+}
+
+.insp-field select {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--paper);
+  color: var(--ink);
+  border-radius: 7px;
+  padding: 6px 8px;
+  font: 500 13px var(--font);
+  letter-spacing: 0;
+  text-transform: none;
+  outline: none;
+}
+
+.solar-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 8px;
+}
+
+.solar-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.solar-grid label.span2 {
+  grid-column: 1 / -1;
+}
+
+.solar-grid input,
+.solar-app input {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+}
+
+#solar-typed[hidden],
+#solar-apps[hidden] {
+  display: none !important;
+}
+
+.solar-app {
+  display: grid;
+  grid-template-columns: 1fr 72px 72px 32px;
+  gap: 4px;
+  margin-bottom: 4px;
+  align-items: center;
+}
+
+.solar-head {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+#solar-apps > button {
+  margin-top: 4px;
+  border: 0;
+  background: var(--linen);
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font: 500 12px var(--font);
+  cursor: pointer;
+  text-align: left;
+}
+
+.solar-app button {
+  border: 0;
+  border-radius: 8px;
+  background: var(--linen);
+  color: var(--ink);
+  cursor: pointer;
+  min-height: 32px;
+  font: 500 14px var(--font);
+}
+
+.solar-result {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--linen);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
+  line-height: 1.45;
+}
+
+.solar-result p,
+.solar-note {
+  margin: 0;
+}
+
+.solar-note {
+  font-family: var(--font);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
 }
 
 .insp-read {

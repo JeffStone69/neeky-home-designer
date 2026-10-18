@@ -8,6 +8,7 @@ import {
   WALL_THICK,
 } from "./constants.js";
 import { uid } from "./geom.js";
+import { EQUIP_KINDS, MOUNTS, cleanEquipment, clonePower, defaultPower } from "./power.js";
 
 export class PlanError extends Error {
   constructor(message) {
@@ -46,6 +47,7 @@ export function migratePlan(data) {
   let cur = { ...data, version };
   while (cur.version < SCHEMA_VERSION) {
     if (cur.version === 1) cur = migrateV1(cur);
+    else if (cur.version === 2) cur = migrateV2(cur);
     else throw new PlanError(`No migration from schema ${cur.version}.`);
   }
   return cur;
@@ -60,6 +62,16 @@ function migrateV1(data) {
     decks: Array.isArray(data.decks) ? data.decks : [],
     steps: Array.isArray(data.steps) ? data.steps : [],
     stumps: Array.isArray(data.stumps) ? data.stumps : [],
+  };
+}
+
+function migrateV2(data) {
+  const power = data.power && typeof data.power === "object" && !Array.isArray(data.power) ? data.power : defaultPower();
+  return {
+    ...data,
+    version: 3,
+    power,
+    equipment: Array.isArray(data.equipment) ? data.equipment : [],
   };
 }
 
@@ -137,6 +149,41 @@ export function validatePlan(data) {
       errors.push(`Stump ${i + 1} has a coordinate that is not a finite number.`);
     }
   });
+  if (data.power != null && (typeof data.power !== "object" || Array.isArray(data.power))) {
+    errors.push("Power settings must be an object.");
+  } else if (data.power) {
+    for (const key of ["dailyKwh", "peakSunHours", "autonomyDays", "losses", "panelW", "panelArea", "availableArea", "dod", "evKw", "evHours"]) {
+      if (data.power[key] != null && !Number.isFinite(Number(data.power[key]))) {
+        errors.push(`Power ${key} is not a finite number.`);
+      }
+    }
+    if (data.power.source != null && data.power.source !== "typed" && data.power.source !== "appliances") {
+      errors.push("Power source must be typed or appliances.");
+    }
+    if (data.power.appliances != null && !Array.isArray(data.power.appliances)) errors.push("Appliances must be a list.");
+    (Array.isArray(data.power.appliances) ? data.power.appliances : []).forEach((a, i) => {
+      if (!a || typeof a !== "object") {
+        errors.push(`Appliance ${i + 1} is not an object.`);
+        return;
+      }
+      if (a.watts != null && !Number.isFinite(Number(a.watts))) errors.push(`Appliance ${i + 1} has watts that are not a finite number.`);
+      if (a.hours != null && !Number.isFinite(Number(a.hours))) errors.push(`Appliance ${i + 1} has hours that are not a finite number.`);
+    });
+  }
+  if (data.equipment != null && !Array.isArray(data.equipment)) errors.push("Equipment must be a list.");
+  (Array.isArray(data.equipment) ? data.equipment : []).forEach((e, i) => {
+    if (!e || typeof e !== "object") {
+      errors.push(`Equipment ${i + 1} is not an object.`);
+      return;
+    }
+    if (!EQUIP_KINDS.includes(e.kind)) errors.push(`Equipment ${i + 1} is not a power object this app understands.`);
+    for (const key of ["x", "z", "w", "d"]) {
+      if (!Number.isFinite(Number(e[key]))) errors.push(`Equipment ${i + 1} has a ${key} that is not a finite number.`);
+    }
+    if (e.tilt != null && !Number.isFinite(Number(e.tilt))) errors.push(`Equipment ${i + 1} has a tilt that is not a finite number.`);
+    if (e.azimuth != null && !Number.isFinite(Number(e.azimuth))) errors.push(`Equipment ${i + 1} has an azimuth that is not a finite number.`);
+    if (e.mount != null && !MOUNTS.includes(e.mount)) errors.push(`Equipment ${i + 1} must sit on the ground, a deck, or a flat area.`);
+  });
   if (data.walls != null && !Array.isArray(data.walls)) errors.push("Walls must be a list.");
   return errors;
 }
@@ -203,6 +250,22 @@ export function serializePlan(state) {
       size: s.size ?? STUMP_SIZE,
       height: s.height ?? STUMP_HEIGHT,
     })),
+    power: clonePower(state.power),
+    equipment: (state.equipment || []).map((e) => {
+      const item = cleanEquipment(e);
+      if (!item) return null;
+      return {
+        kind: item.kind,
+        name: item.name,
+        mount: item.mount,
+        x: item.x,
+        z: item.z,
+        w: item.w,
+        d: item.d,
+        tilt: item.tilt,
+        azimuth: item.azimuth,
+      };
+    }).filter(Boolean),
   };
 }
 
@@ -268,6 +331,10 @@ export function deserializePlan(data) {
     size: finiteNum(s.size, STUMP_SIZE),
     height: finiteNum(s.height, STUMP_HEIGHT),
   }));
+  const equipment = (data.equipment || []).map((e) => {
+    const item = cleanEquipment(e);
+    return item ? { ...item, id: uid("eq") } : null;
+  }).filter(Boolean);
   return {
     title: data.title ? String(data.title) : "",
     dimMode: DIM_MODES.includes(data.dimMode) ? data.dimMode : "centreline",
@@ -279,6 +346,8 @@ export function deserializePlan(data) {
     decks,
     steps,
     stumps,
+    power: clonePower(data.power),
+    equipment,
   };
 }
 

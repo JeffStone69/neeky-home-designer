@@ -3,6 +3,7 @@ import { OrbitControls } from "./vendor/OrbitControls.js";
 import { GLTFExporter } from "./vendor/GLTFExporter.js";
 import { COLORS, MAJOR, MINOR, WALL_HEIGHT, WALL_THICK } from "./constants.js";
 import { deckCorners, elementPoints, normalizeDeck } from "./elements.js";
+import { EQUIP } from "./power.js";
 import { sceneBounds, wallLen } from "./geom.js";
 import { addFurniture3d } from "./furniture.js";
 
@@ -60,6 +61,7 @@ export function createView3D(canvas) {
   let roomMeshes = [];
   let onRoomClick = null;
   let onFurnClick = null;
+  let onEquipClick = null;
   let onContext = null;
   let selectedRoomId = null;
   let raf = 0;
@@ -318,6 +320,56 @@ export function createView3D(canvas) {
     }
   }
 
+  function addArray(eq, drop, selected) {
+    const w = Math.abs(Number(eq.w) || 0);
+    const d = Math.abs(Number(eq.d) || 0);
+    if (w < 0.05 || d < 0.05) return;
+    const tilt = Math.min(Math.PI / 2, Math.max(0, ((Number(eq.tilt) || 0) * Math.PI) / 180));
+    const azimuth = ((Number(eq.azimuth) || 0) * Math.PI) / 180;
+    const base = eq.mount === "deck" ? 0.16 : eq.mount === "flat" ? -drop + 0.05 : -drop + 0.4;
+    const g = new THREE.Group();
+    g.position.set((Number(eq.x) || 0) + w / 2, base, (Number(eq.z) || 0) + d / 2);
+    g.rotation.y = -azimuth;
+    const panel = new THREE.Mesh(
+      new THREE.BoxGeometry(w, 0.05, d),
+      new THREE.MeshLambertMaterial({ color: selected ? 0x6ea894 : 0x1b3330 }),
+    );
+    panel.rotation.x = tilt;
+    panel.position.y = Math.sin(tilt) * (d / 2);
+    panel.castShadow = true;
+    panel.receiveShadow = true;
+    panel.userData.equipId = eq.id;
+    g.userData.equipId = eq.id;
+    g.add(panel);
+    house.add(g);
+  }
+
+  function addEquipBox(eq, drop, selected) {
+    const spec = EQUIP[eq.kind] || EQUIP.battery;
+    const w = Math.max(0.1, Math.abs(Number(eq.w) || spec.w));
+    const d = Math.max(0.1, Math.abs(Number(eq.d) || spec.d));
+    const h = spec.h;
+    const onSoil = eq.kind === "generator";
+    const colors = { battery: 0x2f5d50, inverter: 0x2c2a28, charger: 0x3d6b4f, generator: 0x6b5344 };
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(w, h, d),
+      new THREE.MeshLambertMaterial({ color: selected ? 0x8fb9a4 : colors[eq.kind] || 0x2f5d50 }),
+    );
+    mesh.position.set((Number(eq.x) || 0) + w / 2, (onSoil ? -drop : 0) + h / 2, (Number(eq.z) || 0) + d / 2);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.userData.equipId = eq.id;
+    house.add(mesh);
+  }
+
+  function addEquipment(list, drop, selectedId) {
+    for (const eq of list || []) {
+      const selected = eq.id === selectedId;
+      if (eq.kind === "array") addArray(eq, drop, selected);
+      else addEquipBox(eq, drop, selected);
+    }
+  }
+
   function planBox(plan) {
     return sceneBounds(plan.walls, elementPoints(plan));
   }
@@ -341,6 +393,8 @@ export function createView3D(canvas) {
     for (const r of plan.rooms) {
       floorMesh(r, r.id === selRoom);
     }
+    const selEq = plan.selection?.kind === "equipment" ? plan.selection.id : null;
+    addEquipment(plan.equipment, drop, selEq);
     const selFurn = plan.selection?.kind === "furniture" ? plan.selection.id : null;
     for (const f of plan.furniture || []) {
       if (f.hidden) continue;
@@ -391,6 +445,7 @@ export function createView3D(canvas) {
       let o = h.object;
       while (o) {
         if (o.userData.furnId) return { kind: "furniture", id: o.userData.furnId };
+        if (o.userData.equipId) return { kind: "equipment", id: o.userData.equipId };
         if (o.userData.openingId) return { kind: "opening", id: o.userData.openingId };
         if (o.userData.wallId) return { kind: "wall", id: o.userData.wallId };
         if (o.userData.roomId) return { kind: "room", id: o.userData.roomId };
@@ -424,7 +479,7 @@ export function createView3D(canvas) {
   });
 
   canvas.addEventListener("pointerdown", (e) => {
-    if (!onRoomClick && !onFurnClick) return;
+    if (!onRoomClick && !onFurnClick && !onEquipClick) return;
     const rect = canvas.getBoundingClientRect();
     pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -432,8 +487,9 @@ export function createView3D(canvas) {
     const hits = raycaster.intersectObjects(house.children, true);
     if (!hits[0]) return;
     let o = hits[0].object;
-    while (o && !o.userData.furnId && !o.userData.roomId) o = o.parent;
+    while (o && !o.userData.furnId && !o.userData.roomId && !o.userData.equipId) o = o.parent;
     if (o?.userData.furnId && onFurnClick) onFurnClick(o.userData.furnId);
+    else if (o?.userData.equipId && onEquipClick) onEquipClick(o.userData.equipId);
     else if (o?.userData.roomId && onRoomClick) onRoomClick(o.userData.roomId);
   });
 
@@ -452,6 +508,9 @@ export function createView3D(canvas) {
     },
     setOnFurnClick(fn) {
       onFurnClick = fn;
+    },
+    setOnEquipClick(fn) {
+      onEquipClick = fn;
     },
     setOnContext(fn) {
       onContext = fn;

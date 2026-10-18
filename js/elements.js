@@ -1,5 +1,6 @@
 import { STUMP_HEIGHT, STUMP_SIZE, STUMP_SPACING } from "./constants.js";
 import { uid } from "./geom.js";
+import { equipmentCorners } from "./power.js";
 
 export function normalizeDeck(d) {
   const x = d.w < 0 ? d.x + d.w : d.x;
@@ -92,5 +93,6 @@ export function elementPoints(state) {
   for (const d of state.decks || []) pts.push(...deckCorners(d));
   for (const s of state.steps || []) pts.push(...stepCorners(s));
   for (const s of state.stumps || []) pts.push([s.x, s.z]);
+  for (const e of state.equipment || []) pts.push(...equipmentCorners(e));
   return pts;
 }

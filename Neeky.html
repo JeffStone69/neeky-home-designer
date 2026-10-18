@@ -191,12 +191,14 @@
 }
 
 #gen-btn span,
+#solar-btn span,
 #furnish-btn span {
   display: none;
 }
 
 @media (min-width: 960px) {
   #gen-btn span,
+  #solar-btn span,
   #furnish-btn span {
     display: inline;
   }
@@ -295,6 +297,10 @@
 .popover label {
   user-select: text;
   -webkit-user-select: text;
+}
+
+.popover.solar-open {
+  max-height: min(860px, calc(100dvh - 72px));
 }
 
 .popover {
@@ -818,8 +824,121 @@
   outline: none;
 }
 
-.insp-field input:focus {
+.insp-field input:focus,
+.insp-field select:focus {
   box-shadow: 0 0 0 2px rgb(47 93 80 / 0.25);
+}
+
+.insp-field select {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--paper);
+  color: var(--ink);
+  border-radius: 7px;
+  padding: 6px 8px;
+  font: 500 13px var(--font);
+  letter-spacing: 0;
+  text-transform: none;
+  outline: none;
+}
+
+.solar-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 8px;
+}
+
+.solar-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.solar-grid label.span2 {
+  grid-column: 1 / -1;
+}
+
+.solar-grid input,
+.solar-app input {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+}
+
+#solar-typed[hidden],
+#solar-apps[hidden] {
+  display: none !important;
+}
+
+.solar-app {
+  display: grid;
+  grid-template-columns: 1fr 72px 72px 32px;
+  gap: 4px;
+  margin-bottom: 4px;
+  align-items: center;
+}
+
+.solar-head {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+#solar-apps > button {
+  margin-top: 4px;
+  border: 0;
+  background: var(--linen);
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font: 500 12px var(--font);
+  cursor: pointer;
+  text-align: left;
+}
+
+.solar-app button {
+  border: 0;
+  border-radius: 8px;
+  background: var(--linen);
+  color: var(--ink);
+  cursor: pointer;
+  min-height: 32px;
+  font: 500 14px var(--font);
+}
+
+.solar-result {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--linen);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
+  line-height: 1.45;
+}
+
+.solar-result p,
+.solar-note {
+  margin: 0;
+}
+
+.solar-note {
+  font-family: var(--font);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
 }
 
 .insp-read {
@@ -921,7 +1040,7 @@ var init_constants = __esm({
   "js/constants.js"() {
     APP = "neeky-home-designer";
     APP_VERSION_LABEL = "1.3";
-    SCHEMA_VERSION = 2;
+    SCHEMA_VERSION = 3;
     STORAGE_KEY = "neeky-home-designer-v2";
     STORAGE_BACKUP_KEY = "neeky-home-designer-v2-unreadable";
     DIM_MODES = ["centreline", "inside", "outside"];
@@ -1602,12 +1721,267 @@ function normalizePlan(plan) {
     furniture: plan.furniture || [],
     decks: plan.decks || [],
     steps: plan.steps || [],
-    stumps: plan.stumps || []
+    stumps: plan.stumps || [],
+    equipment: plan.equipment || []
   };
 }
 var init_geom = __esm({
   "js/geom.js"() {
     init_constants();
+  }
+});
+
+// js/power.js
+function finite(v, fallback) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+function defaultPower() {
+  return {
+    configured: false,
+    source: "typed",
+    dailyKwh: 5,
+    appliances: [],
+    peakSunHours: SUNSHINE_COAST_PSH,
+    autonomyDays: 2,
+    losses: 0.2,
+    panelW: 440,
+    panelArea: 2,
+    availableArea: 18,
+    dod: 0.8,
+    includeEv: false,
+    evKw: 7,
+    evHours: 2
+  };
+}
+function normalizePower(raw) {
+  const d = defaultPower();
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return d;
+  const appliances = Array.isArray(raw.appliances) ? raw.appliances.filter((a) => a && typeof a === "object").map((a) => ({
+    name: String(a.name || "").slice(0, 32),
+    watts: Math.max(0, finite(a.watts, 0)),
+    hours: Math.max(0, finite(a.hours, 0))
+  })) : [];
+  return {
+    configured: raw.configured === true,
+    source: raw.source === "appliances" ? "appliances" : "typed",
+    dailyKwh: Math.max(0, finite(raw.dailyKwh, d.dailyKwh)),
+    appliances,
+    peakSunHours: Math.max(0, finite(raw.peakSunHours, d.peakSunHours)),
+    autonomyDays: Math.max(0, finite(raw.autonomyDays, d.autonomyDays)),
+    losses: Math.min(1, Math.max(0, finite(raw.losses, d.losses))),
+    panelW: Math.max(0, finite(raw.panelW, d.panelW)),
+    panelArea: Math.max(0, finite(raw.panelArea, d.panelArea)),
+    availableArea: Math.max(0, finite(raw.availableArea, d.availableArea)),
+    dod: Math.min(1, Math.max(0, finite(raw.dod, d.dod))),
+    includeEv: raw.includeEv === true,
+    evKw: Math.max(0, finite(raw.evKw, d.evKw)),
+    evHours: Math.min(24, Math.max(0, finite(raw.evHours, d.evHours)))
+  };
+}
+function clonePower(power) {
+  const p = normalizePower(power);
+  return { ...p, appliances: p.appliances.map((a) => ({ ...a })) };
+}
+function roundUp(n, step) {
+  if (!(n > 0)) return 0;
+  return Math.ceil(n / step - 1e-9) * step * 1e3 / 1e3;
+}
+function applianceKwh(list) {
+  let sum = 0;
+  for (const a of list || []) {
+    sum += Math.max(0, Number(a.watts) || 0) * Math.max(0, Number(a.hours) || 0) / 1e3;
+  }
+  return sum;
+}
+function maxApplianceKw(list) {
+  let m = 0;
+  for (const a of list || []) m = Math.max(m, Math.max(0, Number(a.watts) || 0) / 1e3);
+  return m;
+}
+function sizePower(raw) {
+  const p = normalizePower(raw);
+  const houseKwh = p.source === "appliances" ? applianceKwh(p.appliances) : p.dailyKwh;
+  const evKwh = p.includeEv ? p.evKw * p.evHours : 0;
+  const dailyKwh = houseKwh + evKwh;
+  const derate = p.losses >= 1 ? 0 : 1 - p.losses;
+  const panelKw = p.panelW / 1e3;
+  let requiredKw = 0;
+  let neededCount = 0;
+  if (dailyKwh > 0) {
+    if (!(p.peakSunHours > 0) || !(derate > 0) || !(panelKw > 0)) {
+      requiredKw = Infinity;
+      neededCount = null;
+    } else {
+      requiredKw = dailyKwh / (p.peakSunHours * derate);
+      neededCount = Math.ceil(requiredKw / panelKw - 1e-9);
+    }
+  }
+  const fitCount = p.panelArea > 0 ? Math.floor((p.availableArea + 1e-9) / p.panelArea) : 0;
+  const panelCount = neededCount == null ? 0 : Math.min(neededCount, Math.max(0, fitCount));
+  const arrayKw = panelCount * panelKw;
+  const expectedDailyKwh = arrayKw * p.peakSunHours * derate;
+  const usableKwh = dailyKwh * p.autonomyDays;
+  let nominalKwh = 0;
+  if (usableKwh > 0) nominalKwh = p.dod > 0 ? usableKwh / p.dod : null;
+  const housePeak = Math.max(houseKwh / HOUSE_PEAK_HOURS, p.source === "appliances" ? maxApplianceKw(p.appliances) : 0);
+  const evPeak = p.includeEv ? p.evKw : 0;
+  const inverterKw = roundUp(Math.max(housePeak, evPeak), 0.5);
+  const generatorKva = roundUp(inverterKw * GEN_HEADROOM / GEN_PF, 0.5);
+  return {
+    dailyKwh,
+    houseKwh,
+    evKwh,
+    peakSunHours: p.peakSunHours,
+    losses: p.losses,
+    panelW: p.panelW,
+    requiredKw,
+    neededCount,
+    fitCount,
+    panelCount,
+    arrayKw,
+    expectedDailyKwh,
+    expectedYearlyKwh: expectedDailyKwh * 365,
+    autonomyDays: p.autonomyDays,
+    usableKwh,
+    dod: p.dod,
+    nominalKwh,
+    inverterKw,
+    generatorKva,
+    includeEv: p.includeEv,
+    evKw: p.evKw,
+    shortfall: dailyKwh > 0 && (neededCount == null || panelCount < neededCount)
+  };
+}
+function powerIsActive(power, equipment) {
+  return !!(power?.configured || (equipment || []).length);
+}
+function formatNum(n, digits = 2) {
+  if (n == null || !Number.isFinite(Number(n))) return "-";
+  const f = 10 ** digits;
+  return (Math.round(Number(n) * f) / f).toFixed(digits);
+}
+function powerStatusLine(power, equipment) {
+  if (!powerIsActive(power, equipment)) return "";
+  const r = sizePower(power);
+  const battery = r.nominalKwh == null ? r.usableKwh : r.nominalKwh;
+  return `solar ${formatNum(r.arrayKw)} kW · battery ${formatNum(battery)} kWh`;
+}
+function powerInspectorText(power) {
+  const r = sizePower(power);
+  const nominal = r.nominalKwh == null ? "-" : `${formatNum(r.nominalKwh)} kWh`;
+  return `${r.panelCount} panels · ${formatNum(r.arrayKw)} kW · ${formatNum(r.expectedDailyKwh)} kWh/day · battery ${formatNum(r.usableKwh)} / ${nominal} · inverter ${formatNum(r.inverterKw)} kW · generator ${formatNum(r.generatorKva)} kVA`;
+}
+function wrapWords(text, max) {
+  const words = String(text).split(/\s+/).filter(Boolean);
+  const lines = [];
+  let cur = "";
+  for (const w of words) {
+    if (!cur) cur = w;
+    else if (`${cur} ${w}`.length <= max) cur = `${cur} ${w}`;
+    else {
+      lines.push(cur);
+      cur = w;
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+function powerSheetLines(power, equipment) {
+  if (!powerIsActive(power, equipment)) return [];
+  const r = sizePower(power);
+  const nominal = r.nominalKwh == null ? "-" : `${formatNum(r.nominalKwh)} kWh`;
+  const lines = [
+    "Power",
+    `Daily load ${formatNum(r.dailyKwh)} kWh`,
+    `Panels ${r.panelCount} x ${formatNum(r.panelW, 0)} W`,
+    `Array ${formatNum(r.arrayKw)} kW`,
+    `Expected ${formatNum(r.expectedDailyKwh)} kWh/day`,
+    `Year ${formatNum(r.expectedYearlyKwh, 0)} kWh`,
+    `Battery ${formatNum(r.usableKwh)} usable`,
+    `Nominal ${nominal}`,
+    `DoD ${formatNum(r.dod * 100, 0)}%`,
+    `Inverter ${formatNum(r.inverterKw)} kW`,
+    `Generator ${formatNum(r.generatorKva)} kVA`
+  ];
+  if (r.shortfall) lines.push(`Fits ${r.panelCount} of ${r.neededCount == null ? "-" : r.neededCount} panels`);
+  lines.push(...wrapWords(POWER_NOTE, 40));
+  return lines;
+}
+function normalizeEquip(e) {
+  const w = Number(e?.w) || 0;
+  const d = Number(e?.d) || 0;
+  return {
+    ...e,
+    x: w < 0 ? (Number(e.x) || 0) + w : Number(e.x) || 0,
+    z: d < 0 ? (Number(e.z) || 0) + d : Number(e.z) || 0,
+    w: Math.abs(w),
+    d: Math.abs(d)
+  };
+}
+function equipmentCorners(eq) {
+  const r = normalizeEquip(eq);
+  return [
+    [r.x, r.z],
+    [r.x + r.w, r.z],
+    [r.x + r.w, r.z + r.d],
+    [r.x, r.z + r.d]
+  ];
+}
+function pointInEquipment(p, eq) {
+  const c = equipmentCorners(eq);
+  return p[0] >= c[0][0] - 1e-6 && p[0] <= c[2][0] + 1e-6 && p[1] >= c[0][1] - 1e-6 && p[1] <= c[2][1] + 1e-6;
+}
+function cleanEquipment(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const kind = EQUIP_KINDS.includes(raw.kind) ? raw.kind : null;
+  if (!kind) return null;
+  const spec = EQUIP[kind];
+  const rect2 = normalizeEquip({
+    x: finite(raw.x, 0),
+    z: finite(raw.z, 0),
+    w: finite(raw.w, spec.w),
+    d: finite(raw.d, spec.d)
+  });
+  let azimuth = finite(raw.azimuth, 0);
+  azimuth = (azimuth % 360 + 360) % 360;
+  return {
+    kind,
+    name: String(raw.name || spec.label).slice(0, 40),
+    mount: MOUNTS.includes(raw.mount) ? raw.mount : "ground",
+    x: rect2.x,
+    z: rect2.z,
+    w: rect2.w,
+    d: rect2.d,
+    tilt: Math.min(90, Math.max(0, finite(raw.tilt, kind === "array" ? ARRAY_TILT : 0))),
+    azimuth
+  };
+}
+var SUNSHINE_COAST_PSH, ARRAY_TILT, POWER_NOTE, EQUIP_KINDS, MOUNTS, EQUIP, TINY_HOME_APPLIANCES, HOUSE_PEAK_HOURS, GEN_HEADROOM, GEN_PF;
+var init_power = __esm({
+  "js/power.js"() {
+    SUNSHINE_COAST_PSH = 4.8;
+    ARRAY_TILT = 27;
+    POWER_NOTE = "Planning estimate only. Have a licensed electrician / CEC-accredited designer confirm before purchase or install.";
+    EQUIP_KINDS = ["array", "battery", "inverter", "charger", "generator"];
+    MOUNTS = ["ground", "deck", "flat"];
+    EQUIP = {
+      array: { w: 4, d: 2, h: 0.05, label: "Solar array" },
+      battery: { w: 0.6, d: 0.4, h: 1.1, label: "Battery" },
+      inverter: { w: 0.5, d: 0.22, h: 0.7, label: "Inverter" },
+      charger: { w: 0.36, d: 0.18, h: 0.45, label: "EV charger" },
+      generator: { w: 0.9, d: 0.55, h: 0.55, label: "Generator" }
+    };
+    TINY_HOME_APPLIANCES = [
+      { name: "Fridge", watts: 80, hours: 24 },
+      { name: "Lights", watts: 40, hours: 5 },
+      { name: "Laptop", watts: 60, hours: 6 },
+      { name: "Water pump", watts: 400, hours: 0.5 },
+      { name: "Cooking", watts: 1200, hours: 0.4 }
+    ];
+    HOUSE_PEAK_HOURS = 4;
+    GEN_HEADROOM = 1.25;
+    GEN_PF = 0.8;
   }
 });
 
@@ -1695,12 +2069,14 @@ function elementPoints(state) {
   for (const d of state.decks || []) pts.push(...deckCorners(d));
   for (const s of state.steps || []) pts.push(...stepCorners(s));
   for (const s of state.stumps || []) pts.push([s.x, s.z]);
+  for (const e of state.equipment || []) pts.push(...equipmentCorners(e));
   return pts;
 }
 var init_elements = __esm({
   "js/elements.js"() {
     init_constants();
     init_geom();
+    init_power();
   }
 });
 
@@ -36733,6 +37109,7 @@ function createView3D(canvas) {
   let roomMeshes = [];
   let onRoomClick = null;
   let onFurnClick = null;
+  let onEquipClick = null;
   let onContext = null;
   let selectedRoomId = null;
   let raf = 0;
@@ -36974,6 +37351,53 @@ function createView3D(canvas) {
       house.add(beam);
     }
   }
+  function addArray(eq, drop, selected) {
+    const w = Math.abs(Number(eq.w) || 0);
+    const d = Math.abs(Number(eq.d) || 0);
+    if (w < 0.05 || d < 0.05) return;
+    const tilt = Math.min(Math.PI / 2, Math.max(0, (Number(eq.tilt) || 0) * Math.PI / 180));
+    const azimuth = (Number(eq.azimuth) || 0) * Math.PI / 180;
+    const base = eq.mount === "deck" ? 0.16 : eq.mount === "flat" ? -drop + 0.05 : -drop + 0.4;
+    const g = new Group();
+    g.position.set((Number(eq.x) || 0) + w / 2, base, (Number(eq.z) || 0) + d / 2);
+    g.rotation.y = -azimuth;
+    const panel = new Mesh(
+      new BoxGeometry(w, 0.05, d),
+      new MeshLambertMaterial({ color: selected ? 7252116 : 1782576 })
+    );
+    panel.rotation.x = tilt;
+    panel.position.y = Math.sin(tilt) * (d / 2);
+    panel.castShadow = true;
+    panel.receiveShadow = true;
+    panel.userData.equipId = eq.id;
+    g.userData.equipId = eq.id;
+    g.add(panel);
+    house.add(g);
+  }
+  function addEquipBox(eq, drop, selected) {
+    const spec = EQUIP[eq.kind] || EQUIP.battery;
+    const w = Math.max(0.1, Math.abs(Number(eq.w) || spec.w));
+    const d = Math.max(0.1, Math.abs(Number(eq.d) || spec.d));
+    const h = spec.h;
+    const onSoil = eq.kind === "generator";
+    const colors = { battery: 3104080, inverter: 2894376, charger: 4025167, generator: 7033668 };
+    const mesh = new Mesh(
+      new BoxGeometry(w, h, d),
+      new MeshLambertMaterial({ color: selected ? 9419172 : colors[eq.kind] || 3104080 })
+    );
+    mesh.position.set((Number(eq.x) || 0) + w / 2, (onSoil ? -drop : 0) + h / 2, (Number(eq.z) || 0) + d / 2);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.userData.equipId = eq.id;
+    house.add(mesh);
+  }
+  function addEquipment(list, drop, selectedId) {
+    for (const eq of list || []) {
+      const selected = eq.id === selectedId;
+      if (eq.kind === "array") addArray(eq, drop, selected);
+      else addEquipBox(eq, drop, selected);
+    }
+  }
   function planBox(plan) {
     return sceneBounds(plan.walls, elementPoints(plan));
   }
@@ -36996,6 +37420,8 @@ function createView3D(canvas) {
     for (const r of plan.rooms) {
       floorMesh(r, r.id === selRoom);
     }
+    const selEq = plan.selection?.kind === "equipment" ? plan.selection.id : null;
+    addEquipment(plan.equipment, drop, selEq);
     const selFurn = plan.selection?.kind === "furniture" ? plan.selection.id : null;
     for (const f of plan.furniture || []) {
       if (f.hidden) continue;
@@ -37042,6 +37468,7 @@ function createView3D(canvas) {
       let o = h.object;
       while (o) {
         if (o.userData.furnId) return { kind: "furniture", id: o.userData.furnId };
+        if (o.userData.equipId) return { kind: "equipment", id: o.userData.equipId };
         if (o.userData.openingId) return { kind: "opening", id: o.userData.openingId };
         if (o.userData.wallId) return { kind: "wall", id: o.userData.wallId };
         if (o.userData.roomId) return { kind: "room", id: o.userData.roomId };
@@ -37073,7 +37500,7 @@ function createView3D(canvas) {
     if (hit) onContext(hit, e.clientX, e.clientY);
   });
   canvas.addEventListener("pointerdown", (e) => {
-    if (!onRoomClick && !onFurnClick) return;
+    if (!onRoomClick && !onFurnClick && !onEquipClick) return;
     const rect2 = canvas.getBoundingClientRect();
     pointer.x = (e.clientX - rect2.left) / rect2.width * 2 - 1;
     pointer.y = -((e.clientY - rect2.top) / rect2.height) * 2 + 1;
@@ -37081,8 +37508,9 @@ function createView3D(canvas) {
     const hits = raycaster.intersectObjects(house.children, true);
     if (!hits[0]) return;
     let o = hits[0].object;
-    while (o && !o.userData.furnId && !o.userData.roomId) o = o.parent;
+    while (o && !o.userData.furnId && !o.userData.roomId && !o.userData.equipId) o = o.parent;
     if (o?.userData.furnId && onFurnClick) onFurnClick(o.userData.furnId);
+    else if (o?.userData.equipId && onEquipClick) onEquipClick(o.userData.equipId);
     else if (o?.userData.roomId && onRoomClick) onRoomClick(o.userData.roomId);
   });
   const ro = new ResizeObserver(resize);
@@ -37099,6 +37527,9 @@ function createView3D(canvas) {
     },
     setOnFurnClick(fn) {
       onFurnClick = fn;
+    },
+    setOnEquipClick(fn) {
+      onEquipClick = fn;
     },
     setOnContext(fn) {
       onContext = fn;
@@ -37133,6 +37564,7 @@ var init_view3d = __esm({
     init_GLTFExporter();
     init_constants();
     init_elements();
+    init_power();
     init_geom();
     init_furniture();
   }
@@ -37144,6 +37576,7 @@ init_constants();
 // js/commands.js
 init_constants();
 init_elements();
+init_power();
 init_furniture();
 init_geom();
 
@@ -37151,6 +37584,7 @@ init_geom();
 init_furniture();
 init_geom();
 init_elements();
+init_power();
 function selectedObj(state) {
   const sel = state.selection;
   if (!sel) return null;
@@ -37161,6 +37595,7 @@ function selectedObj(state) {
   if (sel.kind === "deck") return (state.decks || []).find((d) => d.id === sel.id) || null;
   if (sel.kind === "steps") return (state.steps || []).find((s) => s.id === sel.id) || null;
   if (sel.kind === "stump") return (state.stumps || []).find((s) => s.id === sel.id) || null;
+  if (sel.kind === "equipment") return (state.equipment || []).find((e) => e.id === sel.id) || null;
   return null;
 }
 function objectBy(state, kind, id) {
@@ -37171,6 +37606,7 @@ function objectBy(state, kind, id) {
   if (kind === "deck") return (state.decks || []).find((d) => d.id === id) || null;
   if (kind === "steps") return (state.steps || []).find((s) => s.id === id) || null;
   if (kind === "stump") return (state.stumps || []).find((s) => s.id === id) || null;
+  if (kind === "equipment") return (state.equipment || []).find((e) => e.id === id) || null;
   return null;
 }
 function pickHit(state, world, screen, view) {
@@ -37213,6 +37649,10 @@ function pickHit(state, world, screen, view) {
     const q = [a[0] + dx * t, a[1] + dz * t];
     if (Math.hypot(world[0] - q[0], world[1] - q[1]) < openTol) return { kind: "opening", id: op.id };
   }
+  for (const eq of state.equipment || []) {
+    if (eq.kind === "array") continue;
+    if (pointInEquipment(world, eq)) return { kind: "equipment", id: eq.id };
+  }
   for (const s of state.stumps || []) {
     const r = Math.max(0.12, (s.size || 0.15) / 2) + (coarse ? 0.12 : 0.04);
     if (Math.hypot(world[0] - s.x, world[1] - s.z) <= r) return { kind: "stump", id: s.id };
@@ -37222,6 +37662,10 @@ function pickHit(state, world, screen, view) {
   }
   const nw = nearestWall(world, state.walls, wallTol);
   if (nw) return { kind: "wall", id: nw.wall.id };
+  for (const eq of state.equipment || []) {
+    if (eq.kind !== "array") continue;
+    if (pointInEquipment(world, eq)) return { kind: "equipment", id: eq.id };
+  }
   for (const d of state.decks || []) {
     if (pointInDeck(world, d)) return { kind: "deck", id: d.id };
   }
@@ -37317,6 +37761,12 @@ function createCommands(state, api) {
       api.checkpoint();
       removeSite(hit.kind, hit.id);
       api.commit();
+      return;
+    }
+    if (hit.kind === "equipment") {
+      api.checkpoint();
+      removeEquip(hit.id);
+      api.commit();
     }
   }
   function removeSite(kind, id) {
@@ -37324,6 +37774,14 @@ function createCommands(state, api) {
     if (kind === "steps") state.steps = state.steps.filter((d) => d.id !== id);
     if (kind === "stump") state.stumps = state.stumps.filter((d) => d.id !== id);
     if (state.selection?.kind === kind && state.selection.id === id) state.selection = null;
+  }
+  function removeEquip(id) {
+    state.equipment = (state.equipment || []).filter((e) => e.id !== id);
+    if (state.selection?.kind === "equipment" && state.selection.id === id) state.selection = null;
+  }
+  function markPower() {
+    if (!state.power) state.power = defaultPower();
+    state.power.configured = true;
   }
   function placeDeck(draft) {
     const d = normalizeDeck(draft);
@@ -37354,6 +37812,46 @@ function createCommands(state, api) {
       going: 0.28
     });
     state.selection = { kind: "steps", id: state.steps.at(-1).id };
+  }
+  function placeArray(draft) {
+    const d = normalizeEquip(draft);
+    if (d.w < 0.6 || d.d < 0.6) return false;
+    markPower();
+    state.equipment.push({
+      id: uid("eq"),
+      kind: "array",
+      name: EQUIP.array.label,
+      mount: "ground",
+      x: d.x,
+      z: d.z,
+      w: d.w,
+      d: d.d,
+      tilt: ARRAY_TILT,
+      azimuth: 0
+    });
+    state.selection = { kind: "equipment", id: state.equipment.at(-1).id };
+    return true;
+  }
+  function placeEquip(kind, world) {
+    const spec = EQUIP[kind];
+    if (!spec || kind === "array") return false;
+    const g = state.alt ? SNAP_FINE : state.snap;
+    const p = snapPt(world, g);
+    markPower();
+    state.equipment.push({
+      id: uid("eq"),
+      kind,
+      name: spec.label,
+      mount: "ground",
+      x: p[0] - spec.w / 2,
+      z: p[1] - spec.d / 2,
+      w: spec.w,
+      d: spec.d,
+      tilt: 0,
+      azimuth: 0
+    });
+    state.selection = { kind: "equipment", id: state.equipment.at(-1).id };
+    return true;
   }
   function placeStump(world) {
     const g = state.alt ? SNAP_FINE : state.snap;
@@ -37666,6 +38164,19 @@ function createCommands(state, api) {
       else return false;
     });
   }
+  function runEquip(obj, act) {
+    edit(() => {
+      if (act === "del") {
+        removeEquip(obj.id);
+        return;
+      }
+      if (act === "mount-ground" || act === "mount-deck" || act === "mount-flat") {
+        obj.mount = act.slice("mount-".length);
+        return;
+      }
+      return false;
+    });
+  }
   function runSite(obj, act) {
     edit(() => {
       if (act === "del") {
@@ -37693,6 +38204,7 @@ function createCommands(state, api) {
     else if (sel.kind === "opening") runOpening(obj, act);
     else if (sel.kind === "room") runRoom(obj, act);
     else if (sel.kind === "deck" || sel.kind === "steps" || sel.kind === "stump") runSite(obj, act);
+    else if (sel.kind === "equipment") runEquip(obj, act);
   }
   return {
     edit,
@@ -37704,6 +38216,8 @@ function createCommands(state, api) {
     placeDeck,
     placeSteps,
     placeStump,
+    placeArray,
+    placeEquip,
     fillStumps,
     setWallLength,
     refitOpenings,
@@ -38015,6 +38529,7 @@ init_geom();
 init_constants();
 init_elements();
 init_geom();
+init_power();
 var A3 = { w: 420, h: 297 };
 function round(n) {
   return Math.round(n * 1e3) / 1e3;
@@ -38043,6 +38558,15 @@ function planEntities(state) {
       void ang;
       line("STEPS", along, along2);
     }
+  }
+  for (const eq of state.equipment || []) {
+    const pts = equipmentCorners(eq);
+    const w = Math.abs(pts[2][0] - pts[0][0]);
+    const d = Math.abs(pts[2][1] - pts[0][1]);
+    if (w < 0.05 || d < 0.05) continue;
+    const layer = eq.kind === "array" ? "ARRAY" : String(eq.kind || "power").toUpperCase();
+    poly(layer, pts);
+    text("LABELS", [(pts[0][0] + pts[2][0]) / 2, (pts[0][1] + pts[2][1]) / 2], eq.name || eq.kind || "Power", 0.18);
   }
   for (const s of state.stumps || []) {
     const h = (s.size || 0.15) / 2;
@@ -38150,6 +38674,13 @@ function layoutSheet(state, opts = {}) {
   items.push({ op: "fill", pts: [[0, 0], [paperW, 0], [paperW, paperH], [0, paperH]], color: "#f7f4ec" });
   stroke([[margin / 2, margin / 2], [paperW - margin / 2, margin / 2], [paperW - margin / 2, paperH - margin / 2], [margin / 2, paperH - margin / 2], [margin / 2, margin / 2]], "#d4cdc0", 0.3);
   for (const e of entities) {
+    if (e.kind === "poly" && e.layer === "ARRAY") {
+      const pts = e.pts.map(map);
+      fill2(pts, "#d5e6dc");
+      strokeClosed(pts, "#2f5d50", 0.4);
+    }
+  }
+  for (const e of entities) {
     if (e.kind === "poly" && (e.layer === "DECK" || e.layer === "VERANDA")) {
       const pts = e.pts.map(map);
       fill2(pts, e.layer === "VERANDA" ? "#e4ebe6" : "#e7dcc8");
@@ -38163,6 +38694,13 @@ function layoutSheet(state, opts = {}) {
       strokeClosed(pts, "#6b6459", 0.3);
     } else if (e.kind === "line" && e.layer === "STEPS") {
       stroke([map(e.a), map(e.b)], "#6b6459", 0.25);
+    }
+  }
+  for (const e of entities) {
+    if (e.kind === "poly" && ["BATTERY", "INVERTER", "CHARGER", "GENERATOR"].includes(e.layer)) {
+      const pts = e.pts.map(map);
+      fill2(pts, "#2f5d50");
+      strokeClosed(pts, "#1c1917", 0.3);
     }
   }
   for (const e of entities) {
@@ -38233,6 +38771,36 @@ function layoutSheet(state, opts = {}) {
     [date ? `Date ${date}` : "Offline sheet", 400]
   ];
   rows.forEach((row, i) => label(tbx + 3, tby + 6 + i * 5.6, row[0], 3.1, "start", row[1]));
+  const powerLines = powerSheetLines(state.power, state.equipment);
+  if (powerLines.length) {
+    const rowH = 3.8;
+    const boxW = titleW;
+    const boxH = powerLines.length * rowH + 2.4;
+    const x0 = tbx;
+    const y1 = tby - 3;
+    const y0 = y1 - boxH;
+    fill2(
+      [
+        [x0, y0],
+        [x0 + boxW, y0],
+        [x0 + boxW, y1],
+        [x0, y1]
+      ],
+      "#efeae0"
+    );
+    stroke(
+      [
+        [x0, y0],
+        [x0 + boxW, y0],
+        [x0 + boxW, y1],
+        [x0, y1],
+        [x0, y0]
+      ],
+      "#1c1917",
+      0.35
+    );
+    powerLines.forEach((text, i) => label(x0 + 2, y0 + 2.6 + i * rowH, text, 2.45, "start", i === 0 ? 600 : 400));
+  }
   return { w: paperW, h: paperH, scale, items };
 }
 function escapeXml(s) {
@@ -38399,6 +38967,7 @@ function toDxf(state) {
 // js/schema.js
 init_constants();
 init_geom();
+init_power();
 var PlanError = class extends Error {
   constructor(message) {
     super(Array.isArray(message) ? message.join(" ") : message);
@@ -38433,6 +39002,7 @@ function migratePlan(data) {
   let cur = { ...data, version };
   while (cur.version < SCHEMA_VERSION) {
     if (cur.version === 1) cur = migrateV1(cur);
+    else if (cur.version === 2) cur = migrateV2(cur);
     else throw new PlanError(`No migration from schema ${cur.version}.`);
   }
   return cur;
@@ -38446,6 +39016,15 @@ function migrateV1(data) {
     decks: Array.isArray(data.decks) ? data.decks : [],
     steps: Array.isArray(data.steps) ? data.steps : [],
     stumps: Array.isArray(data.stumps) ? data.stumps : []
+  };
+}
+function migrateV2(data) {
+  const power = data.power && typeof data.power === "object" && !Array.isArray(data.power) ? data.power : defaultPower();
+  return {
+    ...data,
+    version: 3,
+    power,
+    equipment: Array.isArray(data.equipment) ? data.equipment : []
   };
 }
 function validatePlan(data) {
@@ -38522,6 +39101,41 @@ function validatePlan(data) {
       errors.push(`Stump ${i + 1} has a coordinate that is not a finite number.`);
     }
   });
+  if (data.power != null && (typeof data.power !== "object" || Array.isArray(data.power))) {
+    errors.push("Power settings must be an object.");
+  } else if (data.power) {
+    for (const key of ["dailyKwh", "peakSunHours", "autonomyDays", "losses", "panelW", "panelArea", "availableArea", "dod", "evKw", "evHours"]) {
+      if (data.power[key] != null && !Number.isFinite(Number(data.power[key]))) {
+        errors.push(`Power ${key} is not a finite number.`);
+      }
+    }
+    if (data.power.source != null && data.power.source !== "typed" && data.power.source !== "appliances") {
+      errors.push("Power source must be typed or appliances.");
+    }
+    if (data.power.appliances != null && !Array.isArray(data.power.appliances)) errors.push("Appliances must be a list.");
+    (Array.isArray(data.power.appliances) ? data.power.appliances : []).forEach((a, i) => {
+      if (!a || typeof a !== "object") {
+        errors.push(`Appliance ${i + 1} is not an object.`);
+        return;
+      }
+      if (a.watts != null && !Number.isFinite(Number(a.watts))) errors.push(`Appliance ${i + 1} has watts that are not a finite number.`);
+      if (a.hours != null && !Number.isFinite(Number(a.hours))) errors.push(`Appliance ${i + 1} has hours that are not a finite number.`);
+    });
+  }
+  if (data.equipment != null && !Array.isArray(data.equipment)) errors.push("Equipment must be a list.");
+  (Array.isArray(data.equipment) ? data.equipment : []).forEach((e, i) => {
+    if (!e || typeof e !== "object") {
+      errors.push(`Equipment ${i + 1} is not an object.`);
+      return;
+    }
+    if (!EQUIP_KINDS.includes(e.kind)) errors.push(`Equipment ${i + 1} is not a power object this app understands.`);
+    for (const key of ["x", "z", "w", "d"]) {
+      if (!Number.isFinite(Number(e[key]))) errors.push(`Equipment ${i + 1} has a ${key} that is not a finite number.`);
+    }
+    if (e.tilt != null && !Number.isFinite(Number(e.tilt))) errors.push(`Equipment ${i + 1} has a tilt that is not a finite number.`);
+    if (e.azimuth != null && !Number.isFinite(Number(e.azimuth))) errors.push(`Equipment ${i + 1} has an azimuth that is not a finite number.`);
+    if (e.mount != null && !MOUNTS.includes(e.mount)) errors.push(`Equipment ${i + 1} must sit on the ground, a deck, or a flat area.`);
+  });
   if (data.walls != null && !Array.isArray(data.walls)) errors.push("Walls must be a list.");
   return errors;
 }
@@ -38586,7 +39200,23 @@ function serializePlan(state) {
       z: s.z,
       size: s.size ?? STUMP_SIZE,
       height: s.height ?? STUMP_HEIGHT
-    }))
+    })),
+    power: clonePower(state.power),
+    equipment: (state.equipment || []).map((e) => {
+      const item = cleanEquipment(e);
+      if (!item) return null;
+      return {
+        kind: item.kind,
+        name: item.name,
+        mount: item.mount,
+        x: item.x,
+        z: item.z,
+        w: item.w,
+        d: item.d,
+        tilt: item.tilt,
+        azimuth: item.azimuth
+      };
+    }).filter(Boolean)
   };
 }
 function deserializePlan(data) {
@@ -38651,6 +39281,10 @@ function deserializePlan(data) {
     size: finiteNum(s.size, STUMP_SIZE),
     height: finiteNum(s.height, STUMP_HEIGHT)
   }));
+  const equipment = (data.equipment || []).map((e) => {
+    const item = cleanEquipment(e);
+    return item ? { ...item, id: uid("eq") } : null;
+  }).filter(Boolean);
   return {
     title: data.title ? String(data.title) : "",
     dimMode: DIM_MODES.includes(data.dimMode) ? data.dimMode : "centreline",
@@ -38661,7 +39295,9 @@ function deserializePlan(data) {
     pins,
     decks,
     steps,
-    stumps
+    stumps,
+    power: clonePower(data.power),
+    equipment
   };
 }
 function importPlanData(data) {
@@ -38708,6 +39344,7 @@ function exportSheet(state, kind, scale) {
 // js/plan2d.js
 init_constants();
 init_elements();
+init_power();
 init_furniture();
 init_geom();
 function createPlan2D(canvas, getState, actions) {
@@ -38805,6 +39442,64 @@ function createPlan2D(canvas, getState, actions) {
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(d.name || (d.kind === "veranda" ? "Veranda" : "Deck"), mid.x, mid.y);
+    }
+  }
+  function drawEquip(eq, cam, ghost) {
+    const r = normalizeEquip(eq);
+    if (r.w < 0.05 || r.d < 0.05) return;
+    const selected = !ghost && getState().selection?.kind === "equipment" && getState().selection.id === eq.id;
+    polyScreen(equipmentCorners(r), cam);
+    const fills = {
+      array: "rgba(47,93,80,0.28)",
+      battery: "rgba(47,93,80,0.82)",
+      inverter: "rgba(44,42,40,0.88)",
+      charger: "rgba(47,93,80,0.55)",
+      generator: "rgba(107,83,68,0.9)"
+    };
+    ctx.fillStyle = ghost ? "rgba(47,93,80,0.16)" : fills[eq.kind] || fills.battery;
+    ctx.fill();
+    if (eq.kind === "array" && !ghost) {
+      ctx.save();
+      polyScreen(equipmentCorners(r), cam);
+      ctx.clip();
+      ctx.beginPath();
+      for (let i = 1; i < 4; i++) {
+        const z = r.z + r.d * i / 4;
+        const a2 = toScreen([r.x, z], cam);
+        const b2 = toScreen([r.x + r.w, z], cam);
+        ctx.moveTo(a2.x, a2.y);
+        ctx.lineTo(b2.x, b2.y);
+      }
+      ctx.strokeStyle = "rgba(28,25,23,0.35)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.restore();
+      const az = (Number(eq.azimuth) || 0) * Math.PI / 180;
+      const len = Math.min(r.w, r.d) * 0.35;
+      const cx = r.x + r.w / 2;
+      const cz = r.z + r.d / 2;
+      const a = toScreen([cx, cz], cam);
+      const b = toScreen([cx + Math.sin(az) * len, cz + Math.cos(az) * len], cam);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.strokeStyle = COLORS.accent;
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+    }
+    ctx.strokeStyle = ghost || selected ? COLORS.accent : COLORS.ink;
+    ctx.lineWidth = selected ? 2 : 1.2;
+    ctx.setLineDash(ghost ? [5, 4] : []);
+    polyScreen(equipmentCorners(r), cam);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (!ghost && cam.zoom * Math.max(r.w, r.d) > 16) {
+      const mid = toScreen([r.x + r.w / 2, r.z + r.d / 2], cam);
+      ctx.fillStyle = eq.kind === "array" || eq.kind === "charger" ? COLORS.ink : COLORS.paper;
+      ctx.font = "500 12px IBM Plex Sans, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(eq.name || EQUIP[eq.kind]?.label || "Power", mid.x, mid.y);
     }
   }
   function drawSteps(step, cam, ghost) {
@@ -38914,6 +39609,8 @@ function createPlan2D(canvas, getState, actions) {
       }
     }
     if (s.draft?.type === "deck") drawDeck(s.draft, cam, true);
+    for (const eq of s.equipment || []) drawEquip(eq, cam, false);
+    if (s.draft?.type === "array") drawEquip(s.draft, cam, true);
     for (const step of s.steps || []) drawSteps(step, cam, false);
     if (s.draft?.type === "steps") drawSteps(s.draft, cam, true);
     for (const room of s.rooms) {
@@ -39285,6 +39982,7 @@ function createPlan2D(canvas, getState, actions) {
 init_constants();
 init_furniture();
 init_geom();
+init_power();
 var ICONS = {
   select: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 4 l14 8 -8 2 -2 8 z"/></svg>`,
   wall: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 18 V6 h4 v12 H4zm6 0 V10 h4 v8 h-4zm6 0 V8 h4 v10 h-4z"/></svg>`,
@@ -39296,6 +39994,7 @@ var ICONS = {
   steps: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 18 h5 v-4 h5 V10 h6"/></svg>`,
   stumps: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="7" cy="8" r="1.4"/><circle cx="12" cy="8" r="1.4"/><circle cx="17" cy="8" r="1.4"/><circle cx="7" cy="13" r="1.4"/><circle cx="12" cy="13" r="1.4"/><circle cx="17" cy="13" r="1.4"/><circle cx="7" cy="18" r="1.4"/><circle cx="12" cy="18" r="1.4"/><circle cx="17" cy="18" r="1.4"/></svg>`,
   gen: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 4 v3 M12 17 v3 M4 12 h3 M17 12 h3"/><circle cx="12" cy="12" r="4.5"/></svg>`,
+  solar: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="7" r="2.1"/><path d="M8 2.6 v1.5 M8 9.8 v1.4 M3.4 7 H4.9 M11.1 7 h1.5 M4.6 3.6 l1 1 M11.4 3.6 l-1 1"/><path d="M3 15.2 h18 l-1.4 4 H4.4 z"/></svg>`,
   undo: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 8 H5 v3"/><path d="M6 10 c2-4 12-4 14 3"/></svg>`,
   redo: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M16 8 h3 v3"/><path d="M18 10 c-2-4 -12-4 -14 3"/></svg>`,
   file: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M7 4 h7 l5 5 v11 H7z"/><path d="M14 4 v5 h5"/></svg>`,
@@ -39336,6 +40035,7 @@ function shellHtml() {
           ${toolBtn("stumps", "Stumps", ICONS.stumps)}
         </div>
         <button type="button" class="tool" id="furnish-btn" title="Furnish">${ICONS.furnish}<span>Furnish</span></button>
+        <button type="button" class="tool" id="solar-btn" title="Solar">${ICONS.solar}<span>Solar</span></button>
         <button type="button" class="tool" id="gen-btn" title="Generate">${ICONS.gen}<span>Generate</span></button>
       </div>
       <div class="cluster view-cluster">
@@ -39399,6 +40099,80 @@ function paletteHtml() {
     item("wc", "WC", "0.40 × 0.70 m"),
     item("tank", "Blue-tongue", "1.80 × 0.60 m · wall")
   ].join("");
+}
+function applianceRowHtml(a = {}) {
+  return `<div class="solar-app">
+    <input data-k="name" maxlength="32" autocomplete="off" aria-label="Appliance" value="${escapeHtml(a.name || "")}" />
+    <input data-k="watts" inputmode="decimal" autocomplete="off" aria-label="Watts" value="${escapeHtml(a.watts ?? "")}" />
+    <input data-k="hours" inputmode="decimal" autocomplete="off" aria-label="Hours per day" value="${escapeHtml(a.hours ?? "")}" />
+    <button type="button" data-act="remove-app" aria-label="Remove appliance">×</button>
+  </div>`;
+}
+function solarInput(name, label, value, span) {
+  return `<label class="${span ? "span2" : ""}">${label}<input name="${name}" inputmode="decimal" autocomplete="off" value="${escapeHtml(value)}" /></label>`;
+}
+function solarResultHtml(result) {
+  const nominal = result.nominalKwh == null ? "-" : `${formatNum(result.nominalKwh)} kWh nominal`;
+  const short = result.shortfall ? `<p>Available area fits ${result.panelCount} of ${result.neededCount == null ? "-" : result.neededCount} panels.</p>` : "";
+  const ev = result.evKwh > 0 ? ` including ${formatNum(result.evKwh)} kWh for the EV` : "";
+  return `<strong>${result.panelCount} panels · ${formatNum(result.arrayKw)} kW</strong>
+    <p>${formatNum(result.expectedDailyKwh)} kWh/day · ${formatNum(result.expectedYearlyKwh, 0)} kWh/year</p>
+    <p>Battery ${formatNum(result.usableKwh)} kWh usable · ${nominal} · DoD ${formatNum(result.dod * 100, 0)}%</p>
+    <p>Inverter ${formatNum(result.inverterKw)} kW · generator ${formatNum(result.generatorKva)} kVA</p>
+    <p>Daily load ${formatNum(result.dailyKwh)} kWh${ev}</p>
+    ${short}
+    <p class="solar-note">${escapeHtml(POWER_NOTE)}</p>`;
+}
+function solarFormHtml(power, resultHtml) {
+  const p = power || {};
+  const typed = p.source !== "appliances";
+  const rows = (p.appliances || []).map((a) => applianceRowHtml(a)).join("");
+  return `<form class="pop-form" id="solar-form" autocomplete="off">
+    <p class="pop-title">Solar and backup</p>
+    <div class="chips">
+      <button type="button" class="chip${typed ? " active" : ""}" data-source="typed">Typed kWh</button>
+      <button type="button" class="chip${typed ? "" : " active"}" data-source="appliances">Appliances</button>
+    </div>
+    <div id="solar-typed" class="solar-grid"${typed ? "" : " hidden"}>
+      ${solarInput("dailyKwh", "Daily use kWh", formatNum(p.dailyKwh, p.dailyKwh % 1 ? 2 : 0), true)}
+    </div>
+    <div id="solar-apps"${typed ? " hidden" : ""}>
+      <div class="solar-app solar-head"><span>Name</span><span>Watts</span><span>Hours</span><span></span></div>
+      <div id="solar-app-list">${rows}</div>
+      <button type="button" data-act="add-app">Add appliance</button>
+    </div>
+    <div class="solar-grid">
+      ${solarInput("peakSunHours", "Peak sun hours", formatNum(p.peakSunHours ?? SUNSHINE_COAST_PSH, 1))}
+      ${solarInput("autonomyDays", "Autonomy days", formatNum(p.autonomyDays, 0))}
+      ${solarInput("lossesPct", "Losses %", formatNum((p.losses ?? 0.2) * 100, 0))}
+      ${solarInput("panelW", "Panel W", formatNum(p.panelW, 0))}
+      ${solarInput("panelArea", "Panel m²", formatNum(p.panelArea, 2))}
+      ${solarInput("availableArea", "Available m²", formatNum(p.availableArea, 2))}
+      ${solarInput("dodPct", "Discharge %", formatNum((p.dod ?? 0.8) * 100, 0), true)}
+    </div>
+    <p class="solar-note">Peak sun hours default to ${formatNum(SUNSHINE_COAST_PSH, 1)} for the Sunshine Coast, about 26.5°S. Discharge % is the battery depth of discharge.</p>
+    <label class="keep"><input type="checkbox" name="includeEv"${p.includeEv ? " checked" : ""} /> Include an EV charger</label>
+    <div class="solar-grid">
+      ${solarInput("evKw", "Charger kW", formatNum(p.evKw, 1))}
+      ${solarInput("evHours", "Hours / day", formatNum(p.evHours, 1))}
+    </div>
+    <p class="solar-note">Hours add kilowatt-hours. The charger kilowatts also size the inverter and generator.</p>
+    <button type="button" data-act="use-arrays">Use placed array area</button>
+    <div id="solar-result" class="solar-result">${resultHtml || ""}</div>
+    <p class="pop-title">Place on the plan</p>
+    <div class="chips">
+      <button type="button" class="chip" data-place="array">Array</button>
+      <button type="button" class="chip" data-place="battery">Battery</button>
+      <button type="button" class="chip" data-place="inverter">Inverter</button>
+      <button type="button" class="chip" data-place="charger">EV charger</button>
+      <button type="button" class="chip" data-place="generator">Generator</button>
+    </div>
+    <p class="solar-note">No roof yet. An array sits on the ground, on a deck, or on a flat area. Azimuth 0 faces north.</p>
+  </form>`;
+}
+function mountField(value) {
+  const opt = (id, label) => `<option value="${id}"${value === id ? " selected" : ""}>${label}</option>`;
+  return `<label class="insp-field span2">Mount<select data-field="mount">${opt("ground", "Ground")}${opt("deck", "Deck")}${opt("flat", "Flat area")}</select></label>`;
 }
 function inspField(name, label, value, span) {
   return `<label class="insp-field${span ? " span2" : ""}">${label}<input data-field="${name}" inputmode="decimal" autocomplete="off" value="${escapeHtml(value)}" /></label>`;
@@ -39474,6 +40248,14 @@ function menuHtml(state, obj, splitT) {
     act("del", "Delete", `class="danger"`);
   } else if (sel.kind === "stump") {
     act("del", "Delete stump", `class="danger"`);
+  } else if (sel.kind === "equipment") {
+    if (obj.kind === "array") {
+      act("mount-ground", "Ground mount");
+      act("mount-deck", "Deck mount");
+      act("mount-flat", "Flat area");
+      sep();
+    }
+    act("del", "Delete", `class="danger"`);
   }
   return rows.join("");
 }
@@ -39485,6 +40267,7 @@ function kickerFor(sel, obj) {
   if (sel.kind === "deck") return obj.kind === "veranda" ? "Veranda" : "Deck";
   if (sel.kind === "steps") return "Steps";
   if (sel.kind === "stump") return "Stump";
+  if (sel.kind === "equipment") return EQUIP[obj.kind]?.label || "Equipment";
   const type = obj.type === "tank" ? "Blue-tongue" : FURN[obj.type]?.label || furnLabel(obj);
   return obj.locked ? `${type} · Locked` : type;
 }
@@ -39492,9 +40275,13 @@ function roomAreaText(room) {
   return fmtArea(internalArea(room));
 }
 
+// js/app.js
+init_power();
+
 // js/store.js
 init_constants();
 init_furniture();
+init_power();
 function createState() {
   return {
     walls: [],
@@ -39505,6 +40292,8 @@ function createState() {
     decks: [],
     steps: [],
     stumps: [],
+    equipment: [],
+    power: defaultPower(),
     title: "",
     dimMode: "centreline",
     tool: "wall",
@@ -39537,6 +40326,8 @@ function snapshot(state) {
     decks: (state.decks || []).map((d) => ({ ...d })),
     steps: (state.steps || []).map((s) => ({ ...s })),
     stumps: (state.stumps || []).map((s) => ({ ...s })),
+    equipment: (state.equipment || []).map((e) => ({ ...e })),
+    power: clonePower(state.power),
     title: state.title || ""
   };
 }
@@ -39549,6 +40340,8 @@ function applySnapshot(state, s) {
   state.decks = (s.decks || []).map((d) => ({ ...d }));
   state.steps = (s.steps || []).map((d) => ({ ...d }));
   state.stumps = (s.stumps || []).map((d) => ({ ...d }));
+  state.equipment = (s.equipment || []).map((e) => ({ ...e }));
+  state.power = clonePower(s.power);
   state.title = s.title || "";
 }
 function checkpoint(state) {
@@ -39706,6 +40499,8 @@ function mount(root) {
       decks: plan.decks || [],
       steps: plan.steps || [],
       stumps: plan.stumps || [],
+      equipment: plan.equipment || [],
+      power: plan.power,
       title: plan.title || ""
     });
     state.walls = norm.walls;
@@ -39717,6 +40512,8 @@ function mount(root) {
     state.decks = (norm.decks || []).map((d) => ({ ...d }));
     state.steps = (norm.steps || []).map((s) => ({ ...s }));
     state.stumps = (norm.stumps || []).map((s) => ({ ...s }));
+    state.equipment = (norm.equipment || []).map((e) => ({ ...e }));
+    state.power = clonePower(norm.power);
     state.title = plan.title || "";
     if (plan.dimMode) state.dimMode = plan.dimMode;
     state.chain = null;
@@ -39767,6 +40564,17 @@ function mount(root) {
       }
       if (state.tool === "stumps") {
         commands.edit(() => commands.placeStump(world));
+        return;
+      }
+      if (state.tool === "array") {
+        const p = snapPt(world, g);
+        state.draft = { type: "array", kind: "array", x: p[0], z: p[1], w: 0, d: 0, azimuth: 0 };
+        dragging = { type: "array" };
+        render();
+        return;
+      }
+      if (EQUIP[state.tool] && state.tool !== "array") {
+        commands.edit(() => commands.placeEquip(state.tool, world));
         return;
       }
       if (state.tool === "wall") {
@@ -39835,6 +40643,14 @@ function mount(root) {
         render();
         return;
       }
+      if (hit?.kind === "equipment") {
+        const eq = state.equipment.find((e) => e.id === hit.id);
+        state.selection = { kind: "equipment", id: hit.id };
+        checkpoint(state);
+        dragging = { type: "move-equip", id: hit.id, dx: world[0] - eq.x, dz: world[1] - eq.z };
+        render();
+        return;
+      }
       if (hit?.kind === "deck") {
         const deck = state.decks.find((d) => d.id === hit.id);
         state.selection = { kind: "deck", id: hit.id };
@@ -39884,6 +40700,22 @@ function mount(root) {
         state.draft.w = p[0] - state.draft.x;
         state.draft.d = p[1] - state.draft.z;
         plan2d.draw();
+        return;
+      }
+      if (dragging?.type === "array" && state.draft) {
+        const p = snapPt(world, g);
+        state.draft.w = p[0] - state.draft.x;
+        state.draft.d = p[1] - state.draft.z;
+        plan2d.draw();
+        return;
+      }
+      if (dragging?.type === "move-equip") {
+        const eq = state.equipment.find((e) => e.id === dragging.id);
+        if (!eq) return;
+        const p = snapPt([world[0] - dragging.dx, world[1] - dragging.dz], g);
+        eq.x = p[0];
+        eq.z = p[1];
+        render();
         return;
       }
       if (state.chain) {
@@ -39967,6 +40799,17 @@ function mount(root) {
         } else render();
         return;
       }
+      if (dragging?.type === "array") {
+        const draft = state.draft;
+        state.draft = null;
+        dragging = null;
+        if (draft && Math.abs(draft.w) >= 0.6 && Math.abs(draft.d) >= 0.6) {
+          checkpoint(state);
+          commands.placeArray(draft);
+          commit();
+        } else render();
+        return;
+      }
       if (dragging?.type === "place") {
         if (state.ghost?.valid) {
           checkpoint(state);
@@ -40007,11 +40850,11 @@ function mount(root) {
       openMenu(client.x, client.y);
     },
     doubleClick(world, screen) {
-      if (["wall", "door", "window", "delete", "furnish", "deck", "steps", "stumps"].includes(state.tool)) return false;
+      if (["wall", "door", "window", "delete", "furnish", "deck", "steps", "stumps", "array", "battery", "inverter", "charger", "generator"].includes(state.tool)) return false;
       const hit = pick(world, screen);
       if (!hit || hit.kind === "handle") return false;
       state.selection = { kind: hit.kind, id: hit.id };
-      state.focusField = hit.kind === "wall" ? "len" : hit.kind === "opening" ? "width" : "name";
+      state.focusField = hit.kind === "wall" ? "len" : hit.kind === "opening" ? "width" : hit.kind === "equipment" ? "w" : "name";
       state.tool = "select";
       hideMenu();
       render();
@@ -40052,6 +40895,10 @@ function mount(root) {
     } else if (state.tool === "deck") extra = " · drag a deck rectangle";
     else if (state.tool === "steps") extra = " · click to place steps";
     else if (state.tool === "stumps") extra = " · click to place a stump";
+    else if (state.tool === "array") extra = " · drag the array rectangle";
+    else if (EQUIP[state.tool]) extra = ` · click to place the ${EQUIP[state.tool].label.toLowerCase()}`;
+    const solar = powerStatusLine(state.power, state.equipment);
+    if (solar) extra += ` · ${solar}`;
     if (state.note) extra += ` · ${state.note}`;
     const summary = `${state.rooms.length} rooms · net ${fmtArea(net)} · GFA ${fmtArea(gfa)}${extra}`;
     const toolName = {
@@ -40064,7 +40911,12 @@ function mount(root) {
       furnish: "Furnish",
       deck: "Deck",
       steps: "Steps",
-      stumps: "Stumps"
+      stumps: "Stumps",
+      array: "Solar array",
+      battery: "Battery",
+      inverter: "Inverter",
+      charger: "EV charger",
+      generator: "Generator"
     }[state.tool];
     status.innerHTML = statusBarHtml({
       snap: state.snap.toFixed(2),
@@ -40105,6 +40957,10 @@ function mount(root) {
       btn.classList.toggle("active", btn.dataset.view === state.view);
     });
     $("#furnish-btn")?.classList.toggle("active", state.tool === "furnish");
+    $("#solar-btn")?.classList.toggle(
+      "active",
+      ["array", "battery", "inverter", "charger", "generator"].includes(state.tool) || !pop.hidden && !!pop.querySelector("#solar-form")
+    );
     root.querySelectorAll("[data-furn]").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.furn === state.furnish);
     });
@@ -40159,6 +41015,7 @@ function mount(root) {
   function hidePop() {
     pop.hidden = true;
     pop.innerHTML = "";
+    pop.classList.remove("solar-open");
   }
   function showPop(anchor, html, width = 320) {
     pop.innerHTML = html;
@@ -40328,6 +41185,108 @@ function mount(root) {
     area2.addEventListener("keypress", stopKeys);
     requestAnimationFrame(() => area2.focus({ preventScroll: false }));
   }
+  function readNum(form, name, fallback) {
+    const raw = form.elements[name]?.value;
+    if (raw == null || String(raw).trim() === "") return fallback;
+    const n = Number(String(raw).trim().replace(/,/g, "."));
+    return Number.isFinite(n) ? n : fallback;
+  }
+  function readSolar(form, prev) {
+    const source = form.querySelector("[data-source].active")?.dataset.source === "appliances" ? "appliances" : "typed";
+    const appliances = [...form.querySelectorAll("#solar-app-list .solar-app")].map((row) => {
+      const name = row.querySelector("[data-k=name]")?.value.trim() || "";
+      const wattsRaw = row.querySelector("[data-k=watts]")?.value.trim() || "";
+      const hoursRaw = row.querySelector("[data-k=hours]")?.value.trim() || "";
+      return { name, wattsRaw, hoursRaw };
+    }).filter((a) => a.name || a.wattsRaw || a.hoursRaw).map((a) => ({
+      name: a.name,
+      watts: Number(a.wattsRaw.replace(/,/g, ".")) || 0,
+      hours: Number(a.hoursRaw.replace(/,/g, ".")) || 0
+    }));
+    return clonePower({
+      ...prev,
+      configured: true,
+      source,
+      dailyKwh: Math.max(0, readNum(form, "dailyKwh", 0)),
+      appliances,
+      peakSunHours: Math.max(0, readNum(form, "peakSunHours", prev.peakSunHours)),
+      autonomyDays: Math.max(0, readNum(form, "autonomyDays", prev.autonomyDays)),
+      losses: clamp(readNum(form, "lossesPct", prev.losses * 100), 0, 100) / 100,
+      panelW: Math.max(0, readNum(form, "panelW", prev.panelW)),
+      panelArea: Math.max(0, readNum(form, "panelArea", prev.panelArea)),
+      availableArea: Math.max(0, readNum(form, "availableArea", prev.availableArea)),
+      dod: clamp(readNum(form, "dodPct", prev.dod * 100), 0, 100) / 100,
+      includeEv: !!form.elements.includeEv?.checked,
+      evKw: Math.max(0, readNum(form, "evKw", prev.evKw)),
+      evHours: clamp(readNum(form, "evHours", prev.evHours), 0, 24)
+    });
+  }
+  function solarPopover(anchor) {
+    if (!state.power?.configured) {
+      checkpoint(state);
+      state.power = clonePower({ ...state.power, configured: true });
+      persist.persist();
+    }
+    const refreshResult = () => {
+      const el = pop.querySelector("#solar-result");
+      if (el) el.innerHTML = solarResultHtml(sizePower(state.power));
+    };
+    showPop(anchor, solarFormHtml(state.power, solarResultHtml(sizePower(state.power))), 420);
+    pop.classList.add("solar-open");
+    const form = pop.querySelector("#solar-form");
+    const apply = () => {
+      state.power = readSolar(form, state.power);
+      refreshResult();
+      updateStatus();
+      persist.persist();
+    };
+    form.addEventListener("submit", (e) => e.preventDefault());
+    form.addEventListener("input", apply);
+    form.addEventListener("change", apply);
+    form.querySelectorAll("[data-source]").forEach((b) => {
+      b.addEventListener("click", () => {
+        form.querySelectorAll("[data-source]").forEach((x) => x.classList.toggle("active", x === b));
+        const mode = b.dataset.source;
+        const apps = form.querySelector("#solar-apps");
+        const typed = form.querySelector("#solar-typed");
+        if (apps) apps.hidden = mode !== "appliances";
+        if (typed) typed.hidden = mode !== "typed";
+        if (mode === "appliances" && !form.querySelector("#solar-app-list .solar-app")) {
+          const list = form.querySelector("#solar-app-list");
+          list.innerHTML = TINY_HOME_APPLIANCES.map((a) => applianceRowHtml(a)).join("");
+        }
+        apply();
+      });
+    });
+    form.addEventListener("click", (e) => {
+      if (e.target.closest("[data-act=add-app]")) {
+        e.preventDefault();
+        form.querySelector("#solar-app-list").insertAdjacentHTML("beforeend", applianceRowHtml());
+        return;
+      }
+      const rm = e.target.closest("[data-act=remove-app]");
+      if (rm) {
+        rm.closest(".solar-app")?.remove();
+        apply();
+        return;
+      }
+      if (e.target.closest("[data-act=use-arrays]")) {
+        const area2 = (state.equipment || []).filter((eq) => eq.kind === "array").reduce((sum, eq) => sum + Math.abs(eq.w) * Math.abs(eq.d), 0);
+        if (area2 < 0.1) {
+          flash("Draw an array first");
+          return;
+        }
+        form.elements.availableArea.value = (Math.round(area2 * 100) / 100).toFixed(2);
+        apply();
+        return;
+      }
+      const place = e.target.closest("[data-place]");
+      if (!place) return;
+      apply();
+      setTool(place.dataset.place);
+    });
+    updateStatus();
+  }
   function filePopover(anchor) {
     showPop(
       anchor,
@@ -40396,9 +41355,9 @@ function mount(root) {
     if (!sel || !obj) return null;
     if (sel.kind === "furniture") return [obj.x, obj.z];
     if (sel.kind === "stump" || sel.kind === "steps") return [obj.x, obj.z];
-    if (sel.kind === "deck") {
-      const d = normalizeDeck(obj);
-      return [d.x + d.w / 2, d.z + d.d / 2];
+    if (sel.kind === "deck" || sel.kind === "equipment") {
+      const d = sel.kind === "deck" ? normalizeDeck(obj) : obj;
+      return [d.x + Math.abs(d.w) / 2, d.z + Math.abs(d.d) / 2];
     }
     if (sel.kind === "wall") return [(obj.a[0] + obj.b[0]) / 2, (obj.a[1] + obj.b[1]) / 2];
     if (sel.kind === "room") return obj.centroid;
@@ -40425,12 +41384,13 @@ function mount(root) {
     if (sel.kind === "deck") return `deck:${obj.id}:${obj.kind}`;
     if (sel.kind === "steps") return `steps:${obj.id}`;
     if (sel.kind === "stump") return `stump:${obj.id}`;
+    if (sel.kind === "equipment") return `eq:${obj.id}:${obj.kind}:${obj.mount}`;
     return "";
   }
   function fieldValue(obj, field) {
     const sel = state.selection;
     if (field === "name") {
-      if (sel?.kind === "room" || sel?.kind === "deck") return obj.name || "";
+      if (sel?.kind === "room" || sel?.kind === "deck" || sel?.kind === "equipment") return obj.name || "";
       return obj.name || (obj.type === "tank" ? "Blue-tongue" : FURN[obj.type]?.label || "");
     }
     if (field === "len") return fmtNum(wallLen(obj));
@@ -40443,6 +41403,8 @@ function mount(root) {
     if (field === "count") return String(obj.count || 0);
     if (field === "going") return fmtNum(obj.going);
     if (field === "size") return fmtNum(obj.size);
+    if (field === "tilt" || field === "azimuth") return String(Math.round(Number(obj[field]) || 0));
+    if (field === "mount") return obj.mount || "ground";
     return "";
   }
   function writeField(obj, field, raw, kind = state.selection?.kind) {
@@ -40457,8 +41419,16 @@ function mount(root) {
         obj.name = text || (obj.kind === "veranda" ? "Veranda" : "Deck");
         return;
       }
+      if (kind === "equipment") {
+        obj.name = text || EQUIP[obj.kind]?.label || "Equipment";
+        return;
+      }
       const fallback = obj.type === "tank" ? "Blue-tongue" : FURN[obj.type]?.label || "";
       obj.name = !text || text === fallback ? "" : text;
+      return;
+    }
+    if (kind === "equipment" && field === "mount") {
+      if (MOUNTS.includes(raw)) obj.mount = raw;
       return;
     }
     const n = typeof raw === "number" ? raw : parseLen(raw);
@@ -40496,6 +41466,12 @@ function mount(root) {
       obj.size = clamp(n, 0.08, 0.45);
       return;
     }
+    if (kind === "equipment") {
+      if (field === "w" || field === "d") obj[field] = clamp(n, obj.kind === "array" ? 0.6 : 0.15, obj.kind === "array" ? 40 : 4);
+      else if (field === "tilt") obj.tilt = clamp(n, 0, 90);
+      else if (field === "azimuth") obj.azimuth = (n % 360 + 360) % 360;
+      return;
+    }
     if (kind !== "furniture") return;
     if (field === "dia") {
       const d = clamp(n, 0.15, 1.8);
@@ -40522,6 +41498,16 @@ function mount(root) {
       return [inspField("width", "Width m", fieldValue(obj, "width")), inspField("count", "Risers", fieldValue(obj, "count")), inspField("going", "Going m", fieldValue(obj, "going"), true)].join("");
     }
     if (sel.kind === "stump") return inspField("size", "Size m", fieldValue(obj, "size"), true);
+    if (sel.kind === "equipment") {
+      const bits = [nameField(obj.name || ""), inspField("w", "Width m", fieldValue(obj, "w")), inspField("d", "Depth m", fieldValue(obj, "d"))];
+      if (obj.kind === "array") {
+        bits.push(mountField(obj.mount || "ground"));
+        bits.push(inspField("tilt", "Tilt °", fieldValue(obj, "tilt")));
+        bits.push(inspField("azimuth", "Azimuth °", fieldValue(obj, "azimuth"), true));
+      }
+      bits.push(`<p class="insp-read">${escapeHtml(powerInspectorText(state.power))}</p>`);
+      return bits.join("");
+    }
     if (obj.type === "tank") return `${nameField(fieldValue(obj, "name"))}<p class="insp-read">1.80 × 0.60 m · snaps to a wall</p>`;
     if (obj.type === "plant") return `${nameField(fieldValue(obj, "name"))}${inspField("dia", "Diameter m", fieldValue(obj, "dia"), true)}`;
     return [
@@ -40704,6 +41690,11 @@ function mount(root) {
       state.selection = { kind: "furniture", id };
       render();
     });
+    view3d.setOnEquipClick((id) => {
+      hideMenu();
+      state.selection = { kind: "equipment", id };
+      render();
+    });
     view3d.setOnContext((hit, x, y) => {
       if (!hit) {
         hideMenu();
@@ -40733,6 +41724,7 @@ function mount(root) {
     const view = e.target.closest("[data-view]");
     if (view) setView(view.dataset.view);
     if (e.target.closest("#gen-btn")) genPopover(e.target.closest("#gen-btn"));
+    if (e.target.closest("#solar-btn")) solarPopover(e.target.closest("#solar-btn"));
     if (e.target.closest("#furnish-btn")) setTool(state.tool === "furnish" ? "select" : "furnish");
     const furn = e.target.closest("[data-furn]");
     if (furn) {
@@ -40876,7 +41868,7 @@ function mount(root) {
         checkpoint(state);
         commands.removeFurniture(state.selection.id);
         commit();
-      } else if (["deck", "steps", "stump"].includes(state.selection?.kind)) {
+      } else if (["deck", "steps", "stump", "equipment"].includes(state.selection?.kind)) {
         commands.deleteHit(state.selection);
       }
     }
@@ -40884,7 +41876,7 @@ function mount(root) {
     if (map[e.key.toLowerCase()] && !e.metaKey && !e.ctrlKey) setTool(map[e.key.toLowerCase()]);
   }
   document.addEventListener("pointerdown", (e) => {
-    if (!pop.hidden && !pop.contains(e.target) && !e.target.closest("#gen-btn, #file-btn, [data-tool=room]")) hidePop();
+    if (!pop.hidden && !pop.contains(e.target) && !e.target.closest("#gen-btn, #solar-btn, #file-btn, [data-tool=room]")) hidePop();
     const menu = $("#ctx-menu");
     if (menu && !menu.hidden && !menu.contains(e.target) && !e.target.closest("#insp-more")) hideMenu();
   });
