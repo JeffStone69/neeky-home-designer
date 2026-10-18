@@ -79,3 +79,84 @@ npm run e2e
 `npm run build` rewrites `Neeky.html` from `js/`, `styles.css`, `fonts.css`, and `favicon.svg` with esbuild. CI runs `build:check` and fails if the committed file drifts. After any source or style change, rebuild and commit `Neeky.html`.
 
 Serve the folder with `python3 start.sh` (or `PORT=8090 python3 start.sh`) and open `http://127.0.0.1:8080/`. Double-click `Neeky.html` for the offline file. Do not double-click `index.html`.
+
+# Karpathy Rules
+
+This file exists because LLMs make predictable mistakes when writing code. Not random mistakes. The same ones, over and over. These are not suggestions. These are rules. Follow them and you'll produce code that doesn't need to be rewritten.
+
+## 1. Read Before You Write
+Read the files you're about to modify. Not skim — read. Look at how similar things are done elsewhere in the project. Check the imports. Look at the tests. Match existing patterns and libraries. If you're not sure how something is done in this project, say so and ask instead of guessing.
+
+## 2. Think Before You Code
+Don't start writing until you've figured out what you're actually doing.
+- State your assumptions explicitly. If uncertain, ask.
+- Name the tradeoffs.
+- If multiple approaches exist, present them briefly with a recommendation.
+- If something is confusing, stop. Name what's confusing. Ask.
+
+Never fill confusion with plausible-looking code.
+
+## 3. Simplicity
+Write the minimum amount of code that solves the specific problem right now.
+- No premature abstraction.
+- No speculative features or "flexibility" that wasn't requested.
+- No error handling for impossible scenarios.
+- No unnecessary configurability — hardcode until there's a real reason not to.
+
+If the only justification is "in case we need to…", you've over-engineered it. Simplify.
+
+## 4. Surgical Changes
+Your diff should be as small as the task allows.
+- Don't touch what you weren't asked to touch.
+- Match the existing style, even if you'd do it differently.
+- Clean up only the mess YOUR changes created (unused imports, variables, etc.).
+- Don't reformat, reorder, or "improve" adjacent code.
+
+Every changed line must trace directly to the user's request. If a line is there because "while I was in there…", revert it.
+
+## 5. Verification
+The difference between code that works and code you think works is testing.
+- When fixing a bug: write a test that reproduces it first, watch it fail, then fix it, then watch it pass.
+- Run existing tests before and after your changes.
+- Test real behavior and interesting cases, not trivial implementation details.
+- If you can't easily write a test, say why — that is useful design information.
+
+## 6. Goal-Driven Execution
+Every task needs a clear, verifiable success criterion before you write code.
+Transform vague tasks into concrete ones:
+- "Add validation" → "Reject missing/invalid email, return 400 with a clear message, and test both cases."
+- "Fix the bug" → "Write a test that reproduces it, make it pass, confirm existing tests still pass."
+
+For multi-step work, state a brief plan first and wait for validation before implementing.
+
+## 7. Debugging
+When something breaks, investigate — don't guess.
+- Read the full error message and stack trace.
+- Reproduce the problem before changing anything.
+- Change one thing at a time.
+- Find the root cause. Don't paper over symptoms (e.g. adding a null check without understanding why it's null).
+
+If stuck, say what you've tried and what you're seeing.
+
+## 8. Dependencies
+Every dependency is permanent code you don't control.
+Before adding a package:
+- Can the project or standard library already do this?
+- Is it actively maintained?
+- Is the size justified?
+
+When you do add one, explicitly say why.
+
+## 9. Communication
+- Say what you did and why, not just dump code.
+- Flag concerns even when you implemented exactly what was asked.
+- Be precise about uncertainty: "I'm not sure this library supports streaming" is useful. "I think this should work" is not.
+
+## 10. Common Failure Modes
+Catch yourself in these patterns and stop immediately:
+- **Kitchen Sink**: asked to fix one thing, you restructure half the codebase.
+- **Wrong Abstraction**: copy-paste logic multiple times, or abstract too early.
+- **Optimistic Path**: only the happy path is handled; errors and edge cases are ignored.
+- **Runaway Refactor**: a small fix cascades across many files.
+
+When you notice any of these, stop and reassess rather than push through.
