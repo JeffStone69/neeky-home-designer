@@ -1,6 +1,7 @@
 import { APP_VERSION_LABEL } from "./constants.js";
 import { FURN, furnLabel } from "./furniture.js";
 import { fmtArea, internalArea } from "./geom.js";
+import { EQUIP, POWER_NOTE, SUNSHINE_COAST_PSH, formatNum } from "./power.js";
 
 export const ICONS = {
   select: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 4 l14 8 -8 2 -2 8 z"/></svg>`,
@@ -13,6 +14,7 @@ export const ICONS = {
   steps: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 18 h5 v-4 h5 V10 h6"/></svg>`,
   stumps: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="7" cy="8" r="1.4"/><circle cx="12" cy="8" r="1.4"/><circle cx="17" cy="8" r="1.4"/><circle cx="7" cy="13" r="1.4"/><circle cx="12" cy="13" r="1.4"/><circle cx="17" cy="13" r="1.4"/><circle cx="7" cy="18" r="1.4"/><circle cx="12" cy="18" r="1.4"/><circle cx="17" cy="18" r="1.4"/></svg>`,
   gen: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 4 v3 M12 17 v3 M4 12 h3 M17 12 h3"/><circle cx="12" cy="12" r="4.5"/></svg>`,
+  solar: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="7" r="2.1"/><path d="M8 2.6 v1.5 M8 9.8 v1.4 M3.4 7 H4.9 M11.1 7 h1.5 M4.6 3.6 l1 1 M11.4 3.6 l-1 1"/><path d="M3 15.2 h18 l-1.4 4 H4.4 z"/></svg>`,
   undo: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 8 H5 v3"/><path d="M6 10 c2-4 12-4 14 3"/></svg>`,
   redo: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M16 8 h3 v3"/><path d="M18 10 c-2-4 -12-4 -14 3"/></svg>`,
   file: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M7 4 h7 l5 5 v11 H7z"/><path d="M14 4 v5 h5"/></svg>`,
@@ -55,6 +57,7 @@ export function shellHtml() {
           ${toolBtn("stumps", "Stumps", ICONS.stumps)}
         </div>
         <button type="button" class="tool" id="furnish-btn" title="Furnish">${ICONS.furnish}<span>Furnish</span></button>
+        <button type="button" class="tool" id="solar-btn" title="Solar">${ICONS.solar}<span>Solar</span></button>
         <button type="button" class="tool" id="gen-btn" title="Generate">${ICONS.gen}<span>Generate</span></button>
       </div>
       <div class="cluster view-cluster">
@@ -125,6 +128,87 @@ export function paletteHtml() {
     item("wc", "WC", "0.40 × 0.70 m"),
     item("tank", "Blue-tongue", "1.80 × 0.60 m · wall"),
   ].join("");
+}
+
+export function applianceRowHtml(a = {}) {
+  return `<div class="solar-app">
+    <input data-k="name" maxlength="32" autocomplete="off" aria-label="Appliance" value="${escapeHtml(a.name || "")}" />
+    <input data-k="watts" inputmode="decimal" autocomplete="off" aria-label="Watts" value="${escapeHtml(a.watts ?? "")}" />
+    <input data-k="hours" inputmode="decimal" autocomplete="off" aria-label="Hours per day" value="${escapeHtml(a.hours ?? "")}" />
+    <button type="button" data-act="remove-app" aria-label="Remove appliance">×</button>
+  </div>`;
+}
+
+function solarInput(name, label, value, span) {
+  return `<label class="${span ? "span2" : ""}">${label}<input name="${name}" inputmode="decimal" autocomplete="off" value="${escapeHtml(value)}" /></label>`;
+}
+
+export function solarResultHtml(result) {
+  const nominal = result.nominalKwh == null ? "-" : `${formatNum(result.nominalKwh)} kWh nominal`;
+  const short = result.shortfall
+    ? `<p>Available area fits ${result.panelCount} of ${result.neededCount == null ? "-" : result.neededCount} panels.</p>`
+    : "";
+  const ev = result.evKwh > 0 ? ` including ${formatNum(result.evKwh)} kWh for the EV` : "";
+  return `<strong>${result.panelCount} panels · ${formatNum(result.arrayKw)} kW</strong>
+    <p>${formatNum(result.expectedDailyKwh)} kWh/day · ${formatNum(result.expectedYearlyKwh, 0)} kWh/year</p>
+    <p>Battery ${formatNum(result.usableKwh)} kWh usable · ${nominal} · DoD ${formatNum(result.dod * 100, 0)}%</p>
+    <p>Inverter ${formatNum(result.inverterKw)} kW · generator ${formatNum(result.generatorKva)} kVA</p>
+    <p>Daily load ${formatNum(result.dailyKwh)} kWh${ev}</p>
+    ${short}
+    <p class="solar-note">${escapeHtml(POWER_NOTE)}</p>`;
+}
+
+export function solarFormHtml(power, resultHtml) {
+  const p = power || {};
+  const typed = p.source !== "appliances";
+  const rows = (p.appliances || []).map((a) => applianceRowHtml(a)).join("");
+  return `<form class="pop-form" id="solar-form" autocomplete="off">
+    <p class="pop-title">Solar and backup</p>
+    <div class="chips">
+      <button type="button" class="chip${typed ? " active" : ""}" data-source="typed">Typed kWh</button>
+      <button type="button" class="chip${typed ? "" : " active"}" data-source="appliances">Appliances</button>
+    </div>
+    <div id="solar-typed" class="solar-grid"${typed ? "" : " hidden"}>
+      ${solarInput("dailyKwh", "Daily use kWh", formatNum(p.dailyKwh, p.dailyKwh % 1 ? 2 : 0), true)}
+    </div>
+    <div id="solar-apps"${typed ? " hidden" : ""}>
+      <div class="solar-app solar-head"><span>Name</span><span>Watts</span><span>Hours</span><span></span></div>
+      <div id="solar-app-list">${rows}</div>
+      <button type="button" data-act="add-app">Add appliance</button>
+    </div>
+    <div class="solar-grid">
+      ${solarInput("peakSunHours", "Peak sun hours", formatNum(p.peakSunHours ?? SUNSHINE_COAST_PSH, 1))}
+      ${solarInput("autonomyDays", "Autonomy days", formatNum(p.autonomyDays, 0))}
+      ${solarInput("lossesPct", "Losses %", formatNum((p.losses ?? 0.2) * 100, 0))}
+      ${solarInput("panelW", "Panel W", formatNum(p.panelW, 0))}
+      ${solarInput("panelArea", "Panel m²", formatNum(p.panelArea, 2))}
+      ${solarInput("availableArea", "Available m²", formatNum(p.availableArea, 2))}
+      ${solarInput("dodPct", "Discharge %", formatNum((p.dod ?? 0.8) * 100, 0), true)}
+    </div>
+    <p class="solar-note">Peak sun hours default to ${formatNum(SUNSHINE_COAST_PSH, 1)} for the Sunshine Coast, about 26.5°S. Discharge % is the battery depth of discharge.</p>
+    <label class="keep"><input type="checkbox" name="includeEv"${p.includeEv ? " checked" : ""} /> Include an EV charger</label>
+    <div class="solar-grid">
+      ${solarInput("evKw", "Charger kW", formatNum(p.evKw, 1))}
+      ${solarInput("evHours", "Hours / day", formatNum(p.evHours, 1))}
+    </div>
+    <p class="solar-note">Hours add kilowatt-hours. The charger kilowatts also size the inverter and generator.</p>
+    <button type="button" data-act="use-arrays">Use placed array area</button>
+    <div id="solar-result" class="solar-result">${resultHtml || ""}</div>
+    <p class="pop-title">Place on the plan</p>
+    <div class="chips">
+      <button type="button" class="chip" data-place="array">Array</button>
+      <button type="button" class="chip" data-place="battery">Battery</button>
+      <button type="button" class="chip" data-place="inverter">Inverter</button>
+      <button type="button" class="chip" data-place="charger">EV charger</button>
+      <button type="button" class="chip" data-place="generator">Generator</button>
+    </div>
+    <p class="solar-note">No roof yet. An array sits on the ground, on a deck, or on a flat area. Azimuth 0 faces north.</p>
+  </form>`;
+}
+
+export function mountField(value) {
+  const opt = (id, label) => `<option value="${id}"${value === id ? " selected" : ""}>${label}</option>`;
+  return `<label class="insp-field span2">Mount<select data-field="mount">${opt("ground", "Ground")}${opt("deck", "Deck")}${opt("flat", "Flat area")}</select></label>`;
 }
 
 export function inspField(name, label, value, span) {
@@ -203,6 +287,14 @@ export function menuHtml(state, obj, splitT) {
     act("del", "Delete", `class="danger"`);
   } else if (sel.kind === "stump") {
     act("del", "Delete stump", `class="danger"`);
+  } else if (sel.kind === "equipment") {
+    if (obj.kind === "array") {
+      act("mount-ground", "Ground mount");
+      act("mount-deck", "Deck mount");
+      act("mount-flat", "Flat area");
+      sep();
+    }
+    act("del", "Delete", `class="danger"`);
   }
   return rows.join("");
 }
@@ -215,6 +307,7 @@ export function kickerFor(sel, obj) {
   if (sel.kind === "deck") return obj.kind === "veranda" ? "Veranda" : "Deck";
   if (sel.kind === "steps") return "Steps";
   if (sel.kind === "stump") return "Stump";
+  if (sel.kind === "equipment") return EQUIP[obj.kind]?.label || "Equipment";
   const type = obj.type === "tank" ? "Blue-tongue" : FURN[obj.type]?.label || furnLabel(obj);
   return obj.locked ? `${type} · Locked` : type;
 }

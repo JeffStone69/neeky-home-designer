@@ -58,6 +58,37 @@ test("Belli Park loads from the single-file build", async ({ page }) => {
   expect(errors, errors.join("\n")).toEqual([]);
 });
 
+test("Belli Park can take a solar array and a battery", async ({ page }) => {
+  const errors = watch(page);
+  await openPlan(page, "/");
+  await page.click('[data-view="plan"]');
+  await page.waitForTimeout(120);
+  await page.click("#solar-btn");
+  await expect(page.locator("#solar-form")).toBeVisible();
+  await expect(page.locator("#solar-result")).toContainText("Planning estimate only");
+  await expect(page.locator("#solar-result")).toContainText("CEC-accredited designer");
+  await page.locator('[data-place="array"]').click();
+  const box = await page.locator("#plan-canvas").boundingBox();
+  await page.mouse.move(box.x + 150, box.y + box.height - 60);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 430, box.y + box.height - 210, { steps: 12 });
+  await page.mouse.up();
+  await expect(page.locator(".insp-kicker")).toHaveText(/Solar array/);
+  await page.click("#solar-btn");
+  await page.locator('[data-place="battery"]').click();
+  await page.mouse.click(box.x + box.width - 140, box.y + 120);
+  await expect(page.locator(".insp-kicker")).toHaveText(/Battery/);
+  await page.click("#file-btn");
+  const downloadPromise = page.waitForEvent("download");
+  await page.locator('[data-f="svg"][data-scale="50"]').click();
+  const download = await downloadPromise;
+  const svg = fs.readFileSync(await download.path(), "utf8");
+  expect(svg).toContain("Planning estimate only");
+  expect(svg).toContain("CEC-accredited designer");
+  expect(svg).toContain("confirm before purchase or install.");
+  expect(errors, errors.join("\n")).toEqual([]);
+});
+
 test("phone toolbar and plan stay usable", async ({ page }) => {
   const errors = watch(page);
   await page.setViewportSize({ width: 390, height: 844 });

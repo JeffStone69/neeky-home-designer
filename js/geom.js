@@ -704,5 +704,6 @@ export function normalizePlan(plan) {
     decks: plan.decks || [],
     steps: plan.steps || [],
     stumps: plan.stumps || [],
+    equipment: plan.equipment || [],
   };
 }

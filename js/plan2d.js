@@ -1,5 +1,6 @@
 import { COLORS, MAJOR, MINOR } from "./constants.js";
 import { deckCorners, elementPoints, normalizeDeck, stepCorners } from "./elements.js";
+import { EQUIP, equipmentCorners, normalizeEquip } from "./power.js";
 import { drawFurniture2d } from "./furniture.js";
 import {
   dimensionBox,
@@ -118,6 +119,65 @@ export function createPlan2D(canvas, getState, actions) {
     }
   }
 
+  function drawEquip(eq, cam, ghost) {
+    const r = normalizeEquip(eq);
+    if (r.w < 0.05 || r.d < 0.05) return;
+    const selected = !ghost && getState().selection?.kind === "equipment" && getState().selection.id === eq.id;
+    polyScreen(equipmentCorners(r), cam);
+    const fills = {
+      array: "rgba(47,93,80,0.28)",
+      battery: "rgba(47,93,80,0.82)",
+      inverter: "rgba(44,42,40,0.88)",
+      charger: "rgba(47,93,80,0.55)",
+      generator: "rgba(107,83,68,0.9)",
+    };
+    ctx.fillStyle = ghost ? "rgba(47,93,80,0.16)" : fills[eq.kind] || fills.battery;
+    ctx.fill();
+    if (eq.kind === "array" && !ghost) {
+      ctx.save();
+      polyScreen(equipmentCorners(r), cam);
+      ctx.clip();
+      ctx.beginPath();
+      for (let i = 1; i < 4; i++) {
+        const z = r.z + (r.d * i) / 4;
+        const a = toScreen([r.x, z], cam);
+        const b = toScreen([r.x + r.w, z], cam);
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+      }
+      ctx.strokeStyle = "rgba(28,25,23,0.35)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.restore();
+      const az = ((Number(eq.azimuth) || 0) * Math.PI) / 180;
+      const len = Math.min(r.w, r.d) * 0.35;
+      const cx = r.x + r.w / 2;
+      const cz = r.z + r.d / 2;
+      const a = toScreen([cx, cz], cam);
+      const b = toScreen([cx + Math.sin(az) * len, cz + Math.cos(az) * len], cam);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.strokeStyle = COLORS.accent;
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+    }
+    ctx.strokeStyle = ghost || selected ? COLORS.accent : COLORS.ink;
+    ctx.lineWidth = selected ? 2 : 1.2;
+    ctx.setLineDash(ghost ? [5, 4] : []);
+    polyScreen(equipmentCorners(r), cam);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (!ghost && cam.zoom * Math.max(r.w, r.d) > 16) {
+      const mid = toScreen([r.x + r.w / 2, r.z + r.d / 2], cam);
+      ctx.fillStyle = eq.kind === "array" || eq.kind === "charger" ? COLORS.ink : COLORS.paper;
+      ctx.font = "500 12px IBM Plex Sans, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(eq.name || EQUIP[eq.kind]?.label || "Power", mid.x, mid.y);
+    }
+  }
+
   function drawSteps(step, cam, ghost) {
     const corners = stepCorners(step);
     polyScreen(corners, cam);
@@ -230,6 +290,8 @@ export function createPlan2D(canvas, getState, actions) {
       }
     }
     if (s.draft?.type === "deck") drawDeck(s.draft, cam, true);
+    for (const eq of s.equipment || []) drawEquip(eq, cam, false);
+    if (s.draft?.type === "array") drawEquip(s.draft, cam, true);
     for (const step of s.steps || []) drawSteps(step, cam, false);
     if (s.draft?.type === "steps") drawSteps(s.draft, cam, true);
 
