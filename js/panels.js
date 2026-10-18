@@ -38,7 +38,7 @@ export function shellHtml() {
   <div class="app">
     <header class="toolbar">
       <div class="brand">
-        <span class="mark" aria-hidden="true"></span>
+        <span class="mark" aria-hidden="true"><svg viewBox="0 0 16 18"><circle cx="5.7" cy="8.7" r="3.15" fill="#62c47a"/><circle cx="10.6" cy="9.05" r="2.9" fill="#3e8f5a"/><circle cx="8.15" cy="6.15" r="2.35" fill="#b7ebbb"/><path fill="#f0d2b0" d="M2.1 11.2h11.8v1.65H2.1z"/><path fill="#c47b45" d="M3.3 12.65h9.4l-1.25 4.2H4.55z"/></svg></span>
         <div class="titles">
           <strong>Neeky</strong>
           <span>Home Designer ${APP_VERSION_LABEL}</span>

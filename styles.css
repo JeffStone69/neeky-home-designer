@@ -68,11 +68,20 @@
 }
 
 .mark {
+  position: relative;
   width: 28px;
   height: 28px;
   border-radius: 7px;
   background: rgb(232 226 214 / 0.1);
   box-shadow: inset 0 0 0 1.4px var(--linen);
+}
+
+.mark svg {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 13px;
+  height: auto;
 }
 
 .titles {
