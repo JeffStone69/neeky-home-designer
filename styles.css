@@ -161,6 +161,7 @@
 
 #gen-btn span,
 #solar-btn span,
+#materials-btn span,
 #furnish-btn span {
   display: none;
 }
@@ -168,6 +169,7 @@
 @media (min-width: 960px) {
   #gen-btn span,
   #solar-btn span,
+  #materials-btn span,
   #furnish-btn span {
     display: inline;
   }
@@ -268,7 +270,8 @@
   -webkit-user-select: text;
 }
 
-.popover.solar-open {
+.popover.solar-open,
+.popover.materials-open {
   max-height: min(860px, calc(100dvh - 72px));
 }
 

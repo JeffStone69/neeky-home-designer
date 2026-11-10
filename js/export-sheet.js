@@ -10,6 +10,7 @@ import {
   sceneBounds,
   wallLen,
 } from "./geom.js";
+import { materialsSheetLines } from "./materials.js";
 import { equipmentCorners, powerSheetLines } from "./power.js";
 
 const A3 = { w: 420, h: 297 };
@@ -265,19 +266,19 @@ export function layoutSheet(state, opts = {}) {
   ];
   rows.forEach((row, i) => label(tbx + 3, tby + 6 + i * 5.6, row[0], 3.1, "start", row[1]));
 
-  const powerLines = powerSheetLines(state.power, state.equipment);
-  if (powerLines.length) {
-    const rowH = 3.8;
-    const boxW = titleW;
-    const boxH = powerLines.length * rowH + 2.4;
+  const rowH = 3.8;
+  let stackTop = tby - 3;
+  const placeBox = (lines) => {
+    if (!lines.length) return;
+    const boxH = lines.length * rowH + 2.4;
     const x0 = tbx;
-    const y1 = tby - 3;
+    const y1 = stackTop;
     const y0 = y1 - boxH;
     fill(
       [
         [x0, y0],
-        [x0 + boxW, y0],
-        [x0 + boxW, y1],
+        [x0 + titleW, y0],
+        [x0 + titleW, y1],
         [x0, y1],
       ],
       "#efeae0",
@@ -285,16 +286,19 @@ export function layoutSheet(state, opts = {}) {
     stroke(
       [
         [x0, y0],
-        [x0 + boxW, y0],
-        [x0 + boxW, y1],
+        [x0 + titleW, y0],
+        [x0 + titleW, y1],
         [x0, y1],
         [x0, y0],
       ],
       "#1c1917",
       0.35,
     );
-    powerLines.forEach((text, i) => label(x0 + 2, y0 + 2.6 + i * rowH, text, 2.45, "start", i === 0 ? 600 : 400));
-  }
+    lines.forEach((text, i) => label(x0 + 2, y0 + 2.6 + i * rowH, text, 2.45, "start", i === 0 ? 600 : 400));
+    stackTop = y0 - 3;
+  };
+  placeBox(powerSheetLines(state.power, state.equipment));
+  placeBox(materialsSheetLines(state));
   return { w: paperW, h: paperH, scale, items };
 }
 

@@ -206,6 +206,7 @@
 
 #gen-btn span,
 #solar-btn span,
+#materials-btn span,
 #furnish-btn span {
   display: none;
 }
@@ -213,6 +214,7 @@
 @media (min-width: 960px) {
   #gen-btn span,
   #solar-btn span,
+  #materials-btn span,
   #furnish-btn span {
     display: inline;
   }
@@ -313,7 +315,8 @@
   -webkit-user-select: text;
 }
 
-.popover.solar-open {
+.popover.solar-open,
+.popover.materials-open {
   max-height: min(860px, calc(100dvh - 72px));
 }
 
@@ -1054,7 +1057,7 @@ var init_constants = __esm({
   "js/constants.js"() {
     APP = "neeky-home-designer";
     APP_VERSION_LABEL = "1.3";
-    SCHEMA_VERSION = 3;
+    SCHEMA_VERSION = 4;
     STORAGE_KEY = "neeky-home-designer-v2";
     STORAGE_BACKUP_KEY = "neeky-home-designer-v2-unreadable";
     DIM_MODES = ["centreline", "inside", "outside"];
@@ -38543,6 +38546,229 @@ init_geom();
 init_constants();
 init_elements();
 init_geom();
+
+// js/materials.js
+init_constants();
+init_geom();
+init_power();
+var STUD_SPACING = 0.6;
+var SHEET_W = 1.2;
+var SHEET_H = 2.4;
+var STOCK_LENGTHS = [2.4, 3, 3.6, 4.2, 4.8, 5.4, 6];
+var DEFAULT_WASTAGE = 0.1;
+var MATERIALS_NOTE = POWER_NOTE;
+var MATERIALS_LIMIT = "Studs are the full wall height. No lintels, noggings, roof, or deck.";
+var SHEET_AREA = SHEET_W * SHEET_H;
+var MAX_STOCK = STOCK_LENGTHS[STOCK_LENGTHS.length - 1];
+function defaultMaterials() {
+  return { wastage: DEFAULT_WASTAGE };
+}
+function normalizeMaterials(raw) {
+  const d = defaultMaterials();
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return d;
+  return { wastage: normalizeWastage(raw.wastage) };
+}
+function cloneMaterials(raw) {
+  return normalizeMaterials(raw);
+}
+function normalizeWastage(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return DEFAULT_WASTAGE;
+  return Math.min(1, Math.max(0, n));
+}
+function roundMm(n) {
+  return Math.round(n * 1e3) / 1e3;
+}
+function orderCount(count, wastage) {
+  if (!(count > 0)) return 0;
+  return Math.ceil(count * (1 + wastage) - 1e-9);
+}
+function sheetCount(area2, wastage) {
+  if (!(area2 > 0)) return 0;
+  return Math.ceil(area2 * (1 + wastage) / SHEET_AREA - 1e-9);
+}
+function splitToStock(length) {
+  const parts = [];
+  let left = roundMm(length);
+  if (!(left > 0)) return parts;
+  while (left > MAX_STOCK + 1e-9) {
+    parts.push(MAX_STOCK);
+    left = roundMm(left - MAX_STOCK);
+  }
+  if (left > 1e-6) parts.push(left);
+  return parts;
+}
+function bestBuy(length, count) {
+  let best = null;
+  for (const stock of STOCK_LENGTHS) {
+    if (stock + 1e-9 < length) continue;
+    const per = Math.floor((stock + 1e-9) / length);
+    if (per < 1) continue;
+    const sticks = Math.ceil(count / per - 1e-9);
+    const metres = sticks * stock;
+    const cand = { length, count, stock, per, sticks, metres };
+    const better = !best || metres < best.metres - 1e-9 || Math.abs(metres - best.metres) < 1e-9 && sticks < best.sticks || Math.abs(metres - best.metres) < 1e-9 && sticks === best.sticks && stock < best.stock;
+    if (better) best = cand;
+  }
+  return best;
+}
+function interiorFaces(walls) {
+  return closedFaces(walls).filter((face) => face.area > 1e-4);
+}
+function faceCounts(wall, interiors) {
+  const len = wallLen(wall);
+  if (!(len > 1e-6)) return { lining: 0, cladding: 0, length: 0 };
+  const dx = (wall.b[0] - wall.a[0]) / len;
+  const dz = (wall.b[1] - wall.a[1]) / len;
+  const mx = (wall.a[0] + wall.b[0]) / 2;
+  const mz = (wall.a[1] + wall.b[1]) / 2;
+  const nx = -dz;
+  const nz = dx;
+  let lining = 0;
+  let cladding = 0;
+  for (const sign2 of [1, -1]) {
+    const p = [mx + nx * 0.05 * sign2, mz + nz * 0.05 * sign2];
+    const inside = interiors.some((face) => pointInPoly(p, face.points));
+    if (inside) lining += 1;
+    else cladding += 1;
+  }
+  return { lining, cladding, length: len };
+}
+function openingSpan(opening, length) {
+  const width = Math.min(Math.max(Number(opening.width) || 0, 0), length);
+  const height = Math.min(Math.max(Number(opening.height) || 0, 0), WALL_HEIGHT);
+  if (!(width > 0.01)) return null;
+  const centre = length * (Number(opening.t) || 0);
+  return {
+    width,
+    height,
+    a: Math.max(0, centre - width / 2),
+    b: Math.min(length, centre + width / 2),
+    door: opening.type === "door"
+  };
+}
+function platePieces(length, doors) {
+  const gaps = doors.map((d) => ({ a: d.a, b: d.b })).filter((d) => d.b - d.a > 1e-6).sort((p, q) => p.a - q.a);
+  const merged = [];
+  for (const gap of gaps) {
+    const last = merged[merged.length - 1];
+    if (!last || gap.a > last.b + 1e-6) merged.push({ ...gap });
+    else last.b = Math.max(last.b, gap.b);
+  }
+  const pieces = [];
+  let cursor = 0;
+  for (const gap of merged) {
+    if (gap.a - cursor > 1e-4) pieces.push(roundMm(gap.a - cursor));
+    cursor = gap.b;
+  }
+  if (length - cursor > 1e-4) pieces.push(roundMm(length - cursor));
+  return pieces;
+}
+function wastageOf(plan, opts) {
+  if (opts && opts.wastage != null) return normalizeWastage(opts.wastage);
+  if (plan?.materials && plan.materials.wastage != null) return normalizeWastage(plan.materials.wastage);
+  return DEFAULT_WASTAGE;
+}
+function takeoff(plan, opts = {}) {
+  const walls = plan?.walls || [];
+  const openings = plan?.openings || [];
+  const wastage = wastageOf(plan, opts);
+  const interiors = walls.length ? interiorFaces(walls) : [];
+  let studs = 0;
+  let liningArea = 0;
+  let claddingArea = 0;
+  let plateMetres = 0;
+  const plateLengths = [];
+  for (const wall of walls) {
+    const faces = faceCounts(wall, interiors);
+    if (!(faces.length > 1e-6)) continue;
+    const spans = [];
+    for (const opening of openings) {
+      if (!opening || opening.wallId !== wall.id) continue;
+      const span = openingSpan(opening, faces.length);
+      if (span) spans.push(span);
+    }
+    const bays = Math.ceil(faces.length / STUD_SPACING - 1e-9);
+    studs += bays + 1 + spans.length * 2;
+    let hole = 0;
+    for (const span of spans) hole += span.width * span.height;
+    const faceArea = Math.max(0, faces.length * WALL_HEIGHT - hole);
+    liningArea += faces.lining * faceArea;
+    claddingArea += faces.cladding * faceArea;
+    const doors = spans.filter((span) => span.door);
+    const bottom = platePieces(faces.length, doors);
+    const top = platePieces(faces.length, []);
+    for (const piece of [...top, ...bottom]) {
+      plateMetres += piece;
+      plateLengths.push(piece);
+    }
+  }
+  const cuts = [];
+  const studsOrder = orderCount(studs, wastage);
+  if (studsOrder > 0) {
+    const buy = bestBuy(WALL_HEIGHT, studsOrder);
+    if (buy) cuts.push({ kind: "stud", ...buy });
+  }
+  const grouped = /* @__PURE__ */ new Map();
+  for (const piece of plateLengths) {
+    for (const part of splitToStock(piece)) {
+      const key = part.toFixed(3);
+      grouped.set(key, (grouped.get(key) || 0) + 1);
+    }
+  }
+  const plateCuts = [];
+  for (const [key, count] of grouped) {
+    const order = orderCount(count, wastage);
+    if (!(order > 0)) continue;
+    const buy = bestBuy(Number(key), order);
+    if (buy) plateCuts.push({ kind: "plate", ...buy });
+  }
+  plateCuts.sort((a, b) => b.length - a.length);
+  cuts.push(...plateCuts);
+  const floorArea = walls.length ? grossFloorArea(walls) : 0;
+  return {
+    wastage,
+    studSpacing: STUD_SPACING,
+    studLength: WALL_HEIGHT,
+    sheet: { w: SHEET_W, h: SHEET_H },
+    studs,
+    studsOrder,
+    plateMetres,
+    liningArea,
+    liningSheets: sheetCount(liningArea, wastage),
+    claddingArea,
+    claddingOrder: claddingArea * (1 + wastage),
+    floorArea,
+    floorSheets: sheetCount(floorArea, wastage),
+    cuts
+  };
+}
+function cutLabel(cut) {
+  const name = cut.kind === "stud" ? "stud" : "plate";
+  return `${cut.count} x ${formatNum(cut.length)} m ${name} from ${cut.sticks} x ${formatNum(cut.stock)} m`;
+}
+function materialsSheetLines(plan) {
+  const walls = plan?.walls || [];
+  if (!walls.some((wall) => wallLen(wall) > 1e-6)) return [];
+  const r = takeoff(plan);
+  const pct = r.wastage * 100;
+  const lines = [
+    "Materials",
+    `Wastage ${formatNum(pct, pct % 1 ? 1 : 0)}%`,
+    `Studs ${r.studsOrder} x ${formatNum(r.studLength)} m`,
+    `Lining ${r.liningSheets} sheets`,
+    `Cladding ${formatNum(r.claddingOrder)} m2`,
+    `Floor ${formatNum(r.floorArea)} m2`,
+    `Floor sheets ${r.floorSheets}`,
+    "Cut list",
+    ...r.cuts.map(cutLabel)
+  ];
+  lines.push(...wrapWords(MATERIALS_NOTE, 40));
+  lines.push(...wrapWords(MATERIALS_LIMIT, 40));
+  return lines;
+}
+
+// js/export-sheet.js
 init_power();
 var A3 = { w: 420, h: 297 };
 function round(n) {
@@ -38786,19 +39012,19 @@ function layoutSheet(state, opts = {}) {
     [date ? `Date ${date}` : "Offline sheet", 400]
   ];
   rows.forEach((row, i) => label(tbx + 3, tby + 6 + i * 5.6, row[0], 3.1, "start", row[1]));
-  const powerLines = powerSheetLines(state.power, state.equipment);
-  if (powerLines.length) {
-    const rowH = 3.8;
-    const boxW = titleW;
-    const boxH = powerLines.length * rowH + 2.4;
+  const rowH = 3.8;
+  let stackTop = tby - 3;
+  const placeBox = (lines) => {
+    if (!lines.length) return;
+    const boxH = lines.length * rowH + 2.4;
     const x0 = tbx;
-    const y1 = tby - 3;
+    const y1 = stackTop;
     const y0 = y1 - boxH;
     fill2(
       [
         [x0, y0],
-        [x0 + boxW, y0],
-        [x0 + boxW, y1],
+        [x0 + titleW, y0],
+        [x0 + titleW, y1],
         [x0, y1]
       ],
       "#efeae0"
@@ -38806,16 +39032,19 @@ function layoutSheet(state, opts = {}) {
     stroke(
       [
         [x0, y0],
-        [x0 + boxW, y0],
-        [x0 + boxW, y1],
+        [x0 + titleW, y0],
+        [x0 + titleW, y1],
         [x0, y1],
         [x0, y0]
       ],
       "#1c1917",
       0.35
     );
-    powerLines.forEach((text, i) => label(x0 + 2, y0 + 2.6 + i * rowH, text, 2.45, "start", i === 0 ? 600 : 400));
-  }
+    lines.forEach((text, i) => label(x0 + 2, y0 + 2.6 + i * rowH, text, 2.45, "start", i === 0 ? 600 : 400));
+    stackTop = y0 - 3;
+  };
+  placeBox(powerSheetLines(state.power, state.equipment));
+  placeBox(materialsSheetLines(state));
   return { w: paperW, h: paperH, scale, items };
 }
 function escapeXml(s) {
@@ -39018,6 +39247,7 @@ function migratePlan(data) {
   while (cur.version < SCHEMA_VERSION) {
     if (cur.version === 1) cur = migrateV1(cur);
     else if (cur.version === 2) cur = migrateV2(cur);
+    else if (cur.version === 3) cur = migrateV3(cur);
     else throw new PlanError(`No migration from schema ${cur.version}.`);
   }
   return cur;
@@ -39040,6 +39270,14 @@ function migrateV2(data) {
     version: 3,
     power,
     equipment: Array.isArray(data.equipment) ? data.equipment : []
+  };
+}
+function migrateV3(data) {
+  const materials = data.materials && typeof data.materials === "object" && !Array.isArray(data.materials) ? data.materials : defaultMaterials();
+  return {
+    ...data,
+    version: 4,
+    materials
   };
 }
 function validatePlan(data) {
@@ -39137,6 +39375,11 @@ function validatePlan(data) {
       if (a.hours != null && !Number.isFinite(Number(a.hours))) errors.push(`Appliance ${i + 1} has hours that are not a finite number.`);
     });
   }
+  if (data.materials != null && (typeof data.materials !== "object" || Array.isArray(data.materials))) {
+    errors.push("Materials settings must be an object.");
+  } else if (data.materials && data.materials.wastage != null && !Number.isFinite(Number(data.materials.wastage))) {
+    errors.push("Materials wastage is not a finite number.");
+  }
   if (data.equipment != null && !Array.isArray(data.equipment)) errors.push("Equipment must be a list.");
   (Array.isArray(data.equipment) ? data.equipment : []).forEach((e, i) => {
     if (!e || typeof e !== "object") {
@@ -39217,6 +39460,7 @@ function serializePlan(state) {
       height: s.height ?? STUMP_HEIGHT
     })),
     power: clonePower(state.power),
+    materials: cloneMaterials(state.materials),
     equipment: (state.equipment || []).map((e) => {
       const item = cleanEquipment(e);
       if (!item) return null;
@@ -39312,6 +39556,7 @@ function deserializePlan(data) {
     steps,
     stumps,
     power: clonePower(data.power),
+    materials: cloneMaterials(data.materials),
     equipment
   };
 }
@@ -40010,6 +40255,7 @@ var ICONS = {
   stumps: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="7" cy="8" r="1.4"/><circle cx="12" cy="8" r="1.4"/><circle cx="17" cy="8" r="1.4"/><circle cx="7" cy="13" r="1.4"/><circle cx="12" cy="13" r="1.4"/><circle cx="17" cy="13" r="1.4"/><circle cx="7" cy="18" r="1.4"/><circle cx="12" cy="18" r="1.4"/><circle cx="17" cy="18" r="1.4"/></svg>`,
   gen: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 4 v3 M12 17 v3 M4 12 h3 M17 12 h3"/><circle cx="12" cy="12" r="4.5"/></svg>`,
   solar: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="7" r="2.1"/><path d="M8 2.6 v1.5 M8 9.8 v1.4 M3.4 7 H4.9 M11.1 7 h1.5 M4.6 3.6 l1 1 M11.4 3.6 l-1 1"/><path d="M3 15.2 h18 l-1.4 4 H4.4 z"/></svg>`,
+  materials: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 10 h16 M4 15 h16 M10 4 v16"/></svg>`,
   undo: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 8 H5 v3"/><path d="M6 10 c2-4 12-4 14 3"/></svg>`,
   redo: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M16 8 h3 v3"/><path d="M18 10 c-2-4 -12-4 -14 3"/></svg>`,
   file: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M7 4 h7 l5 5 v11 H7z"/><path d="M14 4 v5 h5"/></svg>`,
@@ -40052,6 +40298,7 @@ function shellHtml() {
         </div>
         <button type="button" class="tool" id="furnish-btn" title="Furnish">${ICONS.furnish}<span>Furnish</span></button>
         <button type="button" class="tool" id="solar-btn" title="Solar">${ICONS.solar}<span>Solar</span></button>
+        <button type="button" class="tool" id="materials-btn" title="Materials">${ICONS.materials}<span>Materials</span></button>
         <button type="button" class="tool" id="gen-btn" title="Generate">${ICONS.gen}<span>Generate</span></button>
       </div>
       <div class="cluster view-cluster">
@@ -40186,6 +40433,29 @@ function solarFormHtml(power, resultHtml) {
     <p class="solar-note">No roof yet. An array sits on the ground, on a deck, or on a flat area. Azimuth 0 faces north.</p>
   </form>`;
 }
+function materialsResultHtml(result) {
+  const cuts = (result.cuts || []).map((cut) => `<p>${escapeHtml(cutLabel(cut))}</p>`).join("");
+  const cutBlock = cuts ? `<p>Cut list</p>${cuts}` : "";
+  return `<strong>Studs ${result.studsOrder} × ${formatNum(result.studLength)} m</strong>
+    <p>Plates ${formatNum(result.plateMetres)} m</p>
+    <p>Lining ${formatNum(result.liningArea)} m² · ${result.liningSheets} sheets</p>
+    <p>Cladding ${formatNum(result.claddingOrder)} m²</p>
+    <p>Floor ${formatNum(result.floorArea)} m² · ${result.floorSheets} sheets</p>
+    ${cutBlock}
+    <p class="solar-note">${escapeHtml(MATERIALS_NOTE)}</p>
+    <p class="solar-note">${escapeHtml(MATERIALS_LIMIT)}</p>`;
+}
+function materialsFormHtml(materials, resultHtml) {
+  const pct = (materials?.wastage ?? 0.1) * 100;
+  const shown = formatNum(pct, pct % 1 ? 1 : 0);
+  return `<form class="pop-form" id="materials-form" autocomplete="off">
+    <p class="pop-title">Materials</p>
+    <div class="solar-grid">
+      <label class="span2">Wastage %<input name="wastagePct" inputmode="decimal" autocomplete="off" value="${escapeHtml(shown)}" /></label>
+    </div>
+    <div id="materials-result" class="solar-result">${resultHtml || ""}</div>
+  </form>`;
+}
 function mountField(value) {
   const opt = (id, label) => `<option value="${id}"${value === id ? " selected" : ""}>${label}</option>`;
   return `<label class="insp-field span2">Mount<select data-field="mount">${opt("ground", "Ground")}${opt("deck", "Deck")}${opt("flat", "Flat area")}</select></label>`;
@@ -40310,6 +40580,7 @@ function createState() {
     stumps: [],
     equipment: [],
     power: defaultPower(),
+    materials: defaultMaterials(),
     title: "",
     dimMode: "centreline",
     tool: "wall",
@@ -40344,6 +40615,7 @@ function snapshot(state) {
     stumps: (state.stumps || []).map((s) => ({ ...s })),
     equipment: (state.equipment || []).map((e) => ({ ...e })),
     power: clonePower(state.power),
+    materials: cloneMaterials(state.materials),
     title: state.title || ""
   };
 }
@@ -40358,6 +40630,7 @@ function applySnapshot(state, s) {
   state.stumps = (s.stumps || []).map((d) => ({ ...d }));
   state.equipment = (s.equipment || []).map((e) => ({ ...e }));
   state.power = clonePower(s.power);
+  state.materials = cloneMaterials(s.materials);
   state.title = s.title || "";
 }
 function checkpoint(state) {
@@ -40530,6 +40803,7 @@ function mount(root) {
     state.stumps = (norm.stumps || []).map((s) => ({ ...s }));
     state.equipment = (norm.equipment || []).map((e) => ({ ...e }));
     state.power = clonePower(norm.power);
+    state.materials = cloneMaterials(plan.materials);
     state.title = plan.title || "";
     if (plan.dimMode) state.dimMode = plan.dimMode;
     state.chain = null;
@@ -40977,6 +41251,7 @@ function mount(root) {
       "active",
       ["array", "battery", "inverter", "charger", "generator"].includes(state.tool) || !pop.hidden && !!pop.querySelector("#solar-form")
     );
+    $("#materials-btn")?.classList.toggle("active", !pop.hidden && !!pop.querySelector("#materials-form"));
     root.querySelectorAll("[data-furn]").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.furn === state.furnish);
     });
@@ -41031,7 +41306,8 @@ function mount(root) {
   function hidePop() {
     pop.hidden = true;
     pop.innerHTML = "";
-    pop.classList.remove("solar-open");
+    pop.classList.remove("solar-open", "materials-open");
+    syncTools();
   }
   function showPop(anchor, html, width = 320) {
     pop.innerHTML = html;
@@ -41302,6 +41578,38 @@ function mount(root) {
       setTool(place.dataset.place);
     });
     updateStatus();
+  }
+  function materialsPopover(anchor) {
+    const refreshResult = () => {
+      const el = pop.querySelector("#materials-result");
+      if (el) el.innerHTML = materialsResultHtml(takeoff(state));
+    };
+    showPop(anchor, materialsFormHtml(state.materials, materialsResultHtml(takeoff(state))), 420);
+    pop.classList.add("materials-open");
+    const form = pop.querySelector("#materials-form");
+    let drafted = false;
+    const apply = () => {
+      const next = readWastage(form, state.materials.wastage);
+      if (next === state.materials.wastage) return;
+      if (!drafted) {
+        checkpoint(state);
+        drafted = true;
+      }
+      state.materials = cloneMaterials({ wastage: next });
+      refreshResult();
+      persist.persist();
+    };
+    form.addEventListener("submit", (e) => e.preventDefault());
+    form.addEventListener("input", apply);
+    form.addEventListener("change", apply);
+    syncTools();
+  }
+  function readWastage(form, prev) {
+    const raw = form.elements.wastagePct?.value;
+    if (raw == null || String(raw).trim() === "") return prev;
+    const n = Number(String(raw).trim().replace(/,/g, "."));
+    if (!Number.isFinite(n)) return prev;
+    return clamp(n, 0, 100) / 100;
   }
   function filePopover(anchor) {
     showPop(
@@ -41741,6 +42049,7 @@ function mount(root) {
     if (view) setView(view.dataset.view);
     if (e.target.closest("#gen-btn")) genPopover(e.target.closest("#gen-btn"));
     if (e.target.closest("#solar-btn")) solarPopover(e.target.closest("#solar-btn"));
+    if (e.target.closest("#materials-btn")) materialsPopover(e.target.closest("#materials-btn"));
     if (e.target.closest("#furnish-btn")) setTool(state.tool === "furnish" ? "select" : "furnish");
     const furn = e.target.closest("[data-furn]");
     if (furn) {
@@ -41892,7 +42201,7 @@ function mount(root) {
     if (map[e.key.toLowerCase()] && !e.metaKey && !e.ctrlKey) setTool(map[e.key.toLowerCase()]);
   }
   document.addEventListener("pointerdown", (e) => {
-    if (!pop.hidden && !pop.contains(e.target) && !e.target.closest("#gen-btn, #solar-btn, #file-btn, [data-tool=room]")) hidePop();
+    if (!pop.hidden && !pop.contains(e.target) && !e.target.closest("#gen-btn, #solar-btn, #materials-btn, #file-btn, [data-tool=room]")) hidePop();
     const menu = $("#ctx-menu");
     if (menu && !menu.hidden && !menu.contains(e.target) && !e.target.closest("#insp-more")) hideMenu();
   });

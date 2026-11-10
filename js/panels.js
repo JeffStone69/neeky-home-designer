@@ -1,6 +1,7 @@
 import { APP_VERSION_LABEL } from "./constants.js";
 import { FURN, furnLabel } from "./furniture.js";
 import { fmtArea, internalArea } from "./geom.js";
+import { MATERIALS_LIMIT, MATERIALS_NOTE, cutLabel } from "./materials.js";
 import { EQUIP, POWER_NOTE, SUNSHINE_COAST_PSH, formatNum } from "./power.js";
 
 export const ICONS = {
@@ -15,6 +16,7 @@ export const ICONS = {
   stumps: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="7" cy="8" r="1.4"/><circle cx="12" cy="8" r="1.4"/><circle cx="17" cy="8" r="1.4"/><circle cx="7" cy="13" r="1.4"/><circle cx="12" cy="13" r="1.4"/><circle cx="17" cy="13" r="1.4"/><circle cx="7" cy="18" r="1.4"/><circle cx="12" cy="18" r="1.4"/><circle cx="17" cy="18" r="1.4"/></svg>`,
   gen: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 4 v3 M12 17 v3 M4 12 h3 M17 12 h3"/><circle cx="12" cy="12" r="4.5"/></svg>`,
   solar: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="7" r="2.1"/><path d="M8 2.6 v1.5 M8 9.8 v1.4 M3.4 7 H4.9 M11.1 7 h1.5 M4.6 3.6 l1 1 M11.4 3.6 l-1 1"/><path d="M3 15.2 h18 l-1.4 4 H4.4 z"/></svg>`,
+  materials: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 10 h16 M4 15 h16 M10 4 v16"/></svg>`,
   undo: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 8 H5 v3"/><path d="M6 10 c2-4 12-4 14 3"/></svg>`,
   redo: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M16 8 h3 v3"/><path d="M18 10 c-2-4 -12-4 -14 3"/></svg>`,
   file: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M7 4 h7 l5 5 v11 H7z"/><path d="M14 4 v5 h5"/></svg>`,
@@ -59,6 +61,7 @@ export function shellHtml() {
         </div>
         <button type="button" class="tool" id="furnish-btn" title="Furnish">${ICONS.furnish}<span>Furnish</span></button>
         <button type="button" class="tool" id="solar-btn" title="Solar">${ICONS.solar}<span>Solar</span></button>
+        <button type="button" class="tool" id="materials-btn" title="Materials">${ICONS.materials}<span>Materials</span></button>
         <button type="button" class="tool" id="gen-btn" title="Generate">${ICONS.gen}<span>Generate</span></button>
       </div>
       <div class="cluster view-cluster">
@@ -204,6 +207,31 @@ export function solarFormHtml(power, resultHtml) {
       <button type="button" class="chip" data-place="generator">Generator</button>
     </div>
     <p class="solar-note">No roof yet. An array sits on the ground, on a deck, or on a flat area. Azimuth 0 faces north.</p>
+  </form>`;
+}
+
+export function materialsResultHtml(result) {
+  const cuts = (result.cuts || []).map((cut) => `<p>${escapeHtml(cutLabel(cut))}</p>`).join("");
+  const cutBlock = cuts ? `<p>Cut list</p>${cuts}` : "";
+  return `<strong>Studs ${result.studsOrder} × ${formatNum(result.studLength)} m</strong>
+    <p>Plates ${formatNum(result.plateMetres)} m</p>
+    <p>Lining ${formatNum(result.liningArea)} m² · ${result.liningSheets} sheets</p>
+    <p>Cladding ${formatNum(result.claddingOrder)} m²</p>
+    <p>Floor ${formatNum(result.floorArea)} m² · ${result.floorSheets} sheets</p>
+    ${cutBlock}
+    <p class="solar-note">${escapeHtml(MATERIALS_NOTE)}</p>
+    <p class="solar-note">${escapeHtml(MATERIALS_LIMIT)}</p>`;
+}
+
+export function materialsFormHtml(materials, resultHtml) {
+  const pct = (materials?.wastage ?? 0.1) * 100;
+  const shown = formatNum(pct, pct % 1 ? 1 : 0);
+  return `<form class="pop-form" id="materials-form" autocomplete="off">
+    <p class="pop-title">Materials</p>
+    <div class="solar-grid">
+      <label class="span2">Wastage %<input name="wastagePct" inputmode="decimal" autocomplete="off" value="${escapeHtml(shown)}" /></label>
+    </div>
+    <div id="materials-result" class="solar-result">${resultHtml || ""}</div>
   </form>`;
 }
 

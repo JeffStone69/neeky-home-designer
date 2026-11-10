@@ -150,7 +150,7 @@ test("v2 Belli Park migrates to schema 3 and keeps the deck", () => {
   assert.equal(imported.decks[0].name, "North deck");
   assert.equal(imported.stumps.length, 42);
   const saved = serializePlan({ ...imported, rooms: [] });
-  assert.equal(saved.version, 3);
+  assert.equal(saved.version, 4);
   assert.equal(saved.power.peakSunHours, SUNSHINE_COAST_PSH);
   assert.equal(saved.decks.length, 1);
   assert.equal(saved.equipment.length, 0);
@@ -181,7 +181,7 @@ test("v1 migrates through v2 to v3 and equipment round-trips", () => {
     { id: "b1", kind: "battery", x: 0.2, z: 0.4, w: 0.6, d: 0.4 },
   ];
   const saved = serializePlan({ ...imported, rooms: [] });
-  assert.equal(saved.version, 3);
+  assert.equal(saved.version, 4);
   assert.equal(saved.equipment[0].id, undefined);
   assert.equal(saved.equipment[0].mount, "deck");
   assert.equal(saved.equipment[0].azimuth, 90);
@@ -197,8 +197,8 @@ test("v1 migrates through v2 to v3 and equipment round-trips", () => {
 
 test("a newer schema and an unknown equipment kind are rejected", () => {
   assert.throws(
-    () => importPlanData({ app: "neeky-home-designer", version: 4, walls: [] }),
-    /schema 4/,
+    () => importPlanData({ app: "neeky-home-designer", version: 5, walls: [] }),
+    /schema 5/,
   );
   assert.throws(
     () =>
@@ -243,5 +243,7 @@ test("the sheet table carries the estimate and the caution", () => {
   const dxf = toDxf(plan);
   assert.match(dxf, /ARRAY/);
   const quiet = layoutSheet(normalizePlan(importPlanData(file)), { scale: 50, date: "2026-10-18" });
-  assert.equal(toSvg(quiet).includes(POWER_NOTE), false);
+  const quietText = [...toSvg(quiet).matchAll(/<text[^>]*>([^<]*)</g)].map((m) => m[1]).join(" ");
+  assert.equal(quietText.includes("Daily load"), false);
+  assert.equal(quietText.includes(POWER_NOTE), true);
 });

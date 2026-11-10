@@ -32,9 +32,10 @@ Saved plans are JSON, metres, `app: "neeky-home-designer"`.
 
 - Schema **1** is a file with no `version` (v1.0 / v1.2). It migrates on open.
 - Schema **2** adds decks, steps, stumps, `dimMode`, and `title`. It migrates on open.
-- Schema **3** is the current file (`version: 3`). It adds `power` (solar sizing inputs) and `equipment` (`array`, `battery`, `inverter`, `charger`, `generator`). A newer `version` is rejected with an error; the open plan is left alone.
+- Schema **3** adds `power` (solar sizing inputs) and `equipment` (`array`, `battery`, `inverter`, `charger`, `generator`). It migrates on open.
+- Schema **4** is the current file (`version: 4`). It adds `materials.wastage` (default 0.10). A newer `version` is rejected with an error; the open plan is left alone.
 
-Later roof, electrical, plumbing, materials, elevations, and site layers should be new keys on the plan, with a migration in `js/schema.js`. Do not overload `equipment`. Sizing maths live in `js/power.js` and stay free of `document`.
+Later roof, electrical, plumbing, elevations, and site layers should be new keys on the plan, with a migration in `js/schema.js`. Do not overload `equipment` or `materials`. Sizing maths live in `js/power.js` and `js/materials.js` and stay free of `document`.
 
 Walls are centreline segments `{a:[x,z], b:[x,z]}`. Openings point at a wall by `wallIndex` and a centre parameter `t`. Rooms are labels (`name`, `labelAt`), not geometry. Furniture types are `plant`, `sofa`, `bed`, `table`, `bench`, `robe`, `wc`, `tank`.
 
