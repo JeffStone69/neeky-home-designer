@@ -89,6 +89,35 @@ test("Belli Park can take a solar array and a battery", async ({ page }) => {
   expect(errors, errors.join("\n")).toEqual([]);
 });
 
+test("Belli Park shows a materials list", async ({ page }) => {
+  const errors = watch(page);
+  await openPlan(page, "/");
+  await page.click('[data-view="plan"]');
+  await page.click("#materials-btn");
+  const result = page.locator("#materials-result");
+  await expect(result).toBeVisible();
+  await expect(result).toContainText("Planning estimate only");
+  await expect(result).toContainText("CEC-accredited designer");
+  await expect(result).toContainText("confirm before purchase or install.");
+  const before = await result.innerText();
+  const studs = Number(before.match(/Studs\s+(\d+)/)?.[1]);
+  expect(studs).toBeGreaterThan(0);
+  expect(before).toMatch(/Plates\s+[1-9]/);
+  expect(before).toMatch(/[1-9]\d* sheets/);
+  await page.locator('#materials-form input[name="wastagePct"]').fill("0");
+  const after = Number((await result.innerText()).match(/Studs\s+(\d+)/)?.[1]);
+  expect(after).toBeGreaterThan(0);
+  expect(after).toBeLessThan(studs);
+  await page.click("#file-btn");
+  const downloadPromise = page.waitForEvent("download");
+  await page.locator('[data-f="svg"][data-scale="50"]').click();
+  const svg = fs.readFileSync(await (await downloadPromise).path(), "utf8");
+  expect(svg).toContain("Materials");
+  expect(svg).toContain("Planning estimate only");
+  expect(svg).toContain("Studs");
+  expect(errors, errors.join("\n")).toEqual([]);
+});
+
 test("phone toolbar and plan stay usable", async ({ page }) => {
   const errors = watch(page);
   await page.setViewportSize({ width: 390, height: 844 });

@@ -8,6 +8,7 @@ import {
   WALL_THICK,
 } from "./constants.js";
 import { uid } from "./geom.js";
+import { cloneMaterials, defaultMaterials } from "./materials.js";
 import { EQUIP_KINDS, MOUNTS, cleanEquipment, clonePower, defaultPower } from "./power.js";
 
 export class PlanError extends Error {
@@ -48,6 +49,7 @@ export function migratePlan(data) {
   while (cur.version < SCHEMA_VERSION) {
     if (cur.version === 1) cur = migrateV1(cur);
     else if (cur.version === 2) cur = migrateV2(cur);
+    else if (cur.version === 3) cur = migrateV3(cur);
     else throw new PlanError(`No migration from schema ${cur.version}.`);
   }
   return cur;
@@ -72,6 +74,18 @@ function migrateV2(data) {
     version: 3,
     power,
     equipment: Array.isArray(data.equipment) ? data.equipment : [],
+  };
+}
+
+function migrateV3(data) {
+  const materials =
+    data.materials && typeof data.materials === "object" && !Array.isArray(data.materials)
+      ? data.materials
+      : defaultMaterials();
+  return {
+    ...data,
+    version: 4,
+    materials,
   };
 }
 
@@ -170,6 +184,11 @@ export function validatePlan(data) {
       if (a.hours != null && !Number.isFinite(Number(a.hours))) errors.push(`Appliance ${i + 1} has hours that are not a finite number.`);
     });
   }
+  if (data.materials != null && (typeof data.materials !== "object" || Array.isArray(data.materials))) {
+    errors.push("Materials settings must be an object.");
+  } else if (data.materials && data.materials.wastage != null && !Number.isFinite(Number(data.materials.wastage))) {
+    errors.push("Materials wastage is not a finite number.");
+  }
   if (data.equipment != null && !Array.isArray(data.equipment)) errors.push("Equipment must be a list.");
   (Array.isArray(data.equipment) ? data.equipment : []).forEach((e, i) => {
     if (!e || typeof e !== "object") {
@@ -251,6 +270,7 @@ export function serializePlan(state) {
       height: s.height ?? STUMP_HEIGHT,
     })),
     power: clonePower(state.power),
+    materials: cloneMaterials(state.materials),
     equipment: (state.equipment || []).map((e) => {
       const item = cleanEquipment(e);
       if (!item) return null;
@@ -347,6 +367,7 @@ export function deserializePlan(data) {
     steps,
     stumps,
     power: clonePower(data.power),
+    materials: cloneMaterials(data.materials),
     equipment,
   };
 }

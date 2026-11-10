@@ -1,5 +1,6 @@
 import { SNAP, STORAGE_BACKUP_KEY, STORAGE_KEY } from "./constants.js";
 import { cloneFurn } from "./furniture.js";
+import { cloneMaterials, defaultMaterials } from "./materials.js";
 import { clonePower, defaultPower } from "./power.js";
 import { importPlanData, serializePlan } from "./schema.js";
 
@@ -15,6 +16,7 @@ export function createState() {
     stumps: [],
     equipment: [],
     power: defaultPower(),
+    materials: defaultMaterials(),
     title: "",
     dimMode: "centreline",
     tool: "wall",
@@ -50,6 +52,7 @@ export function snapshot(state) {
     stumps: (state.stumps || []).map((s) => ({ ...s })),
     equipment: (state.equipment || []).map((e) => ({ ...e })),
     power: clonePower(state.power),
+    materials: cloneMaterials(state.materials),
     title: state.title || "",
   };
 }
@@ -65,6 +68,7 @@ export function applySnapshot(state, s) {
   state.stumps = (s.stumps || []).map((d) => ({ ...d }));
   state.equipment = (s.equipment || []).map((e) => ({ ...e }));
   state.power = clonePower(s.power);
+  state.materials = cloneMaterials(s.materials);
   state.title = s.title || "";
 }
 

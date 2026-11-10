@@ -36,10 +36,13 @@ import {
   paletteHtml,
   roomAreaText,
   shellHtml,
+  materialsFormHtml,
+  materialsResultHtml,
   solarFormHtml,
   solarResultHtml,
   statusBarHtml,
 } from "./panels.js";
+import { cloneMaterials, takeoff } from "./materials.js";
 import { EQUIP, MOUNTS, TINY_HOME_APPLIANCES, clonePower, powerInspectorText, powerStatusLine, sizePower } from "./power.js";
 import { serializePlan } from "./schema.js";
 import { applySnapshot, checkpoint, createPersist, createState, keepUnreadableAutosave, readAutosave, snapshot } from "./store.js";
@@ -160,6 +163,7 @@ export function mount(root) {
     state.stumps = (norm.stumps || []).map((s) => ({ ...s }));
     state.equipment = (norm.equipment || []).map((e) => ({ ...e }));
     state.power = clonePower(norm.power);
+    state.materials = cloneMaterials(plan.materials);
     state.title = plan.title || "";
     if (plan.dimMode) state.dimMode = plan.dimMode;
     state.chain = null;
@@ -616,6 +620,7 @@ export function mount(root) {
       "active",
       ["array", "battery", "inverter", "charger", "generator"].includes(state.tool) || (!pop.hidden && !!pop.querySelector("#solar-form")),
     );
+    $("#materials-btn")?.classList.toggle("active", !pop.hidden && !!pop.querySelector("#materials-form"));
     root.querySelectorAll("[data-furn]").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.furn === state.furnish);
     });
@@ -674,7 +679,8 @@ export function mount(root) {
   function hidePop() {
     pop.hidden = true;
     pop.innerHTML = "";
-    pop.classList.remove("solar-open");
+    pop.classList.remove("solar-open", "materials-open");
+    syncTools();
   }
 
   function showPop(anchor, html, width = 320) {
@@ -956,6 +962,40 @@ export function mount(root) {
       setTool(place.dataset.place);
     });
     updateStatus();
+  }
+
+  function materialsPopover(anchor) {
+    const refreshResult = () => {
+      const el = pop.querySelector("#materials-result");
+      if (el) el.innerHTML = materialsResultHtml(takeoff(state));
+    };
+    showPop(anchor, materialsFormHtml(state.materials, materialsResultHtml(takeoff(state))), 420);
+    pop.classList.add("materials-open");
+    const form = pop.querySelector("#materials-form");
+    let drafted = false;
+    const apply = () => {
+      const next = readWastage(form, state.materials.wastage);
+      if (next === state.materials.wastage) return;
+      if (!drafted) {
+        checkpoint(state);
+        drafted = true;
+      }
+      state.materials = cloneMaterials({ wastage: next });
+      refreshResult();
+      persist.persist();
+    };
+    form.addEventListener("submit", (e) => e.preventDefault());
+    form.addEventListener("input", apply);
+    form.addEventListener("change", apply);
+    syncTools();
+  }
+
+  function readWastage(form, prev) {
+    const raw = form.elements.wastagePct?.value;
+    if (raw == null || String(raw).trim() === "") return prev;
+    const n = Number(String(raw).trim().replace(/,/g, "."));
+    if (!Number.isFinite(n)) return prev;
+    return clamp(n, 0, 100) / 100;
   }
 
   function filePopover(anchor) {
@@ -1414,6 +1454,7 @@ export function mount(root) {
     if (view) setView(view.dataset.view);
     if (e.target.closest("#gen-btn")) genPopover(e.target.closest("#gen-btn"));
     if (e.target.closest("#solar-btn")) solarPopover(e.target.closest("#solar-btn"));
+    if (e.target.closest("#materials-btn")) materialsPopover(e.target.closest("#materials-btn"));
     if (e.target.closest("#furnish-btn")) setTool(state.tool === "furnish" ? "select" : "furnish");
     const furn = e.target.closest("[data-furn]");
     if (furn) {
@@ -1571,7 +1612,7 @@ export function mount(root) {
   }
 
   document.addEventListener("pointerdown", (e) => {
-    if (!pop.hidden && !pop.contains(e.target) && !e.target.closest("#gen-btn, #solar-btn, #file-btn, [data-tool=room]")) hidePop();
+    if (!pop.hidden && !pop.contains(e.target) && !e.target.closest("#gen-btn, #solar-btn, #materials-btn, #file-btn, [data-tool=room]")) hidePop();
     const menu = $("#ctx-menu");
     if (menu && !menu.hidden && !menu.contains(e.target) && !e.target.closest("#insp-more")) hideMenu();
   });

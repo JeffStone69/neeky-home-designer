@@ -1,7 +1,7 @@
 export const APP = "neeky-home-designer";
 export const APP_VERSION = "1.3.0";
 export const APP_VERSION_LABEL = "1.3";
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 export const VERSION = SCHEMA_VERSION;
 export const STORAGE_KEY = "neeky-home-designer-v2";
 export const STORAGE_BACKUP_KEY = "neeky-home-designer-v2-unreadable";
