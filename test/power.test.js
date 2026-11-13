@@ -150,7 +150,7 @@ test("v2 Belli Park migrates to schema 3 and keeps the deck", () => {
   assert.equal(imported.decks[0].name, "North deck");
   assert.equal(imported.stumps.length, 42);
   const saved = serializePlan({ ...imported, rooms: [] });
-  assert.equal(saved.version, 4);
+  assert.equal(saved.version, 5);
   assert.equal(saved.power.peakSunHours, SUNSHINE_COAST_PSH);
   assert.equal(saved.decks.length, 1);
   assert.equal(saved.equipment.length, 0);
@@ -181,7 +181,7 @@ test("v1 migrates through v2 to v3 and equipment round-trips", () => {
     { id: "b1", kind: "battery", x: 0.2, z: 0.4, w: 0.6, d: 0.4 },
   ];
   const saved = serializePlan({ ...imported, rooms: [] });
-  assert.equal(saved.version, 4);
+  assert.equal(saved.version, 5);
   assert.equal(saved.equipment[0].id, undefined);
   assert.equal(saved.equipment[0].mount, "deck");
   assert.equal(saved.equipment[0].azimuth, 90);
@@ -197,8 +197,8 @@ test("v1 migrates through v2 to v3 and equipment round-trips", () => {
 
 test("a newer schema and an unknown equipment kind are rejected", () => {
   assert.throws(
-    () => importPlanData({ app: "neeky-home-designer", version: 5, walls: [] }),
-    /schema 5/,
+    () => importPlanData({ app: "neeky-home-designer", version: 6, walls: [] }),
+    /schema 6/,
   );
   assert.throws(
     () =>

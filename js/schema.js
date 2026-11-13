@@ -10,6 +10,7 @@ import {
 import { uid } from "./geom.js";
 import { cloneMaterials, defaultMaterials } from "./materials.js";
 import { EQUIP_KINDS, MOUNTS, cleanEquipment, clonePower, defaultPower } from "./power.js";
+import { ROOF_HIGHS, ROOF_SHAPES, cloneRoof, defaultRoof } from "./roof.js";
 
 export class PlanError extends Error {
   constructor(message) {
@@ -50,6 +51,7 @@ export function migratePlan(data) {
     if (cur.version === 1) cur = migrateV1(cur);
     else if (cur.version === 2) cur = migrateV2(cur);
     else if (cur.version === 3) cur = migrateV3(cur);
+    else if (cur.version === 4) cur = migrateV4(cur);
     else throw new PlanError(`No migration from schema ${cur.version}.`);
   }
   return cur;
@@ -86,6 +88,15 @@ function migrateV3(data) {
     ...data,
     version: 4,
     materials,
+  };
+}
+
+function migrateV4(data) {
+  const roof = data.roof && typeof data.roof === "object" && !Array.isArray(data.roof) ? data.roof : defaultRoof();
+  return {
+    ...data,
+    version: 5,
+    roof,
   };
 }
 
@@ -189,6 +200,21 @@ export function validatePlan(data) {
   } else if (data.materials && data.materials.wastage != null && !Number.isFinite(Number(data.materials.wastage))) {
     errors.push("Materials wastage is not a finite number.");
   }
+  if (data.roof != null && (typeof data.roof !== "object" || Array.isArray(data.roof))) {
+    errors.push("Roof settings must be an object.");
+  } else if (data.roof) {
+    if (data.roof.shape != null && !ROOF_SHAPES.includes(data.roof.shape)) {
+      errors.push("Roof shape must be a skillion or a gable.");
+    }
+    if (data.roof.high != null && !ROOF_HIGHS.includes(data.roof.high)) {
+      errors.push("Roof high side must be north, south, east, or west.");
+    }
+    for (const key of ["pitch", "eave", "gable", "rainfall"]) {
+      if (data.roof[key] != null && !Number.isFinite(Number(data.roof[key]))) {
+        errors.push(`Roof ${key} is not a finite number.`);
+      }
+    }
+  }
   if (data.equipment != null && !Array.isArray(data.equipment)) errors.push("Equipment must be a list.");
   (Array.isArray(data.equipment) ? data.equipment : []).forEach((e, i) => {
     if (!e || typeof e !== "object") {
@@ -271,6 +297,7 @@ export function serializePlan(state) {
     })),
     power: clonePower(state.power),
     materials: cloneMaterials(state.materials),
+    roof: cloneRoof(state.roof),
     equipment: (state.equipment || []).map((e) => {
       const item = cleanEquipment(e);
       if (!item) return null;
@@ -368,6 +395,7 @@ export function deserializePlan(data) {
     stumps,
     power: clonePower(data.power),
     materials: cloneMaterials(data.materials),
+    roof: cloneRoof(data.roof),
     equipment,
   };
 }

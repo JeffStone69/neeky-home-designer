@@ -16,11 +16,13 @@
 // inside face of an external wall. Cladding is the outside face, reported as
 // area. Floor sheets cover the gross floor area (outside faces). Openings
 // are cut out of lining and cladding. Wastage is applied before rounding up
-// to a whole stud, plate piece, or sheet.
+// to a whole stud, plate piece, or sheet. Roof rafters, battens, and roofing
+// sheets from js/roof.js use the same wastage.
 
 import { WALL_HEIGHT } from "./constants.js";
 import { closedFaces, grossFloorArea, pointInPoly, wallLen } from "./geom.js";
 import { POWER_NOTE, formatNum, wrapWords } from "./power.js";
+import { roofModel, roofOrderLines } from "./roof.js";
 
 export const STUD_SPACING = 0.6;
 export const SHEET_W = 1.2;
@@ -29,7 +31,7 @@ export const STOCK_LENGTHS = [2.4, 3.0, 3.6, 4.2, 4.8, 5.4, 6.0];
 export const DEFAULT_WASTAGE = 0.1;
 export const MATERIALS_NOTE = POWER_NOTE;
 export const MATERIALS_LIMIT =
-  "Studs are the full wall height. No lintels, noggings, roof, or deck.";
+  "Studs are the full wall height. No lintels, noggings, or deck.";
 
 const SHEET_AREA = SHEET_W * SHEET_H;
 const MAX_STOCK = STOCK_LENGTHS[STOCK_LENGTHS.length - 1];
@@ -158,6 +160,61 @@ function platePieces(length, doors) {
   return pieces;
 }
 
+function memberCuts(kind, length, count, wastage) {
+  const grouped = new Map();
+  if (!(count > 0) || !(length > 0)) return [];
+  for (let i = 0; i < count; i++) {
+    for (const part of splitToStock(length)) {
+      const key = part.toFixed(3);
+      grouped.set(key, (grouped.get(key) || 0) + 1);
+    }
+  }
+  const cuts = [];
+  for (const [key, n] of grouped) {
+    const order = orderCount(n, wastage);
+    if (!(order > 0)) continue;
+    const buy = bestBuy(Number(key), order);
+    if (buy) cuts.push({ kind, ...buy });
+  }
+  cuts.sort((a, b) => b.length - a.length);
+  return cuts;
+}
+
+function roofSection(plan, wastage) {
+  const model = roofModel(plan?.walls, plan?.roof);
+  if (!model) return { section: null, cuts: [] };
+  return {
+    section: {
+      shape: model.shape,
+      pitch: model.pitch,
+      high: model.high,
+      planes: model.planes,
+      catchment: model.catchment,
+      litres: model.litres,
+      rainfall: model.rainfall,
+      runoff: model.runoff,
+      gutters: model.gutters,
+      gutterLength: model.gutterLength,
+      downpipes: model.downpipes,
+      rafterLength: model.rafterLength,
+      rafters: model.rafterCount,
+      raftersOrder: orderCount(model.rafterCount, wastage),
+      battenLength: model.battenLength,
+      battens: model.battenCount,
+      battensOrder: orderCount(model.battenCount, wastage),
+      sheetLength: model.sheetLength,
+      sheets: model.sheetCount,
+      sheetsOrder: orderCount(model.sheetCount, wastage),
+      ridgeLength: model.ridgeLength,
+      flashingLength: model.flashingLength,
+    },
+    cuts: [
+      ...memberCuts("rafter", model.rafterLength, model.rafterCount, wastage),
+      ...memberCuts("batten", model.battenLength, model.battenCount, wastage),
+    ],
+  };
+}
+
 function wastageOf(plan, opts) {
   if (opts && opts.wastage != null) return normalizeWastage(opts.wastage);
   if (plan?.materials && plan.materials.wastage != null) return normalizeWastage(plan.materials.wastage);
@@ -224,6 +281,8 @@ export function takeoff(plan, opts = {}) {
   cuts.push(...plateCuts);
 
   const floorArea = walls.length ? grossFloorArea(walls) : 0;
+  const roofed = roofSection(plan, wastage);
+  cuts.push(...roofed.cuts);
   return {
     wastage,
     studSpacing: STUD_SPACING,
@@ -239,11 +298,13 @@ export function takeoff(plan, opts = {}) {
     floorArea,
     floorSheets: sheetCount(floorArea, wastage),
     cuts,
+    roof: roofed.section,
   };
 }
 
 export function cutLabel(cut) {
-  const name = cut.kind === "stud" ? "stud" : "plate";
+  const names = { stud: "stud", plate: "plate", rafter: "rafter", batten: "batten" };
+  const name = names[cut.kind] || cut.kind;
   return `${cut.count} x ${formatNum(cut.length)} m ${name} from ${cut.sticks} x ${formatNum(cut.stock)} m`;
 }
 
@@ -262,6 +323,7 @@ export function materialsSheetLines(plan) {
     `Floor sheets ${r.floorSheets}`,
     "Cut list",
     ...r.cuts.map(cutLabel),
+    ...roofOrderLines(r.roof),
   ];
   lines.push(...wrapWords(MATERIALS_NOTE, 40));
   lines.push(...wrapWords(MATERIALS_LIMIT, 40));

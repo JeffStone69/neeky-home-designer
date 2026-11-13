@@ -168,7 +168,7 @@ test("schema 3 gains a wastage setting and round-trips", () => {
   const imported = importPlanData(file);
   assert.equal(imported.materials.wastage, 0.1);
   const saved = serializePlan({ ...imported, rooms: [] });
-  assert.equal(saved.version, 4);
+  assert.equal(saved.version, 5);
   assert.equal(saved.materials.wastage, 0.1);
   saved.materials.wastage = 0.15;
   const back = importPlanData(saved);
@@ -182,7 +182,7 @@ test("schema 3 gains a wastage setting and round-trips", () => {
   assert.ok(r.liningSheets > 0);
   assert.ok(r.floorSheets > 0);
   assert.throws(
-    () => importPlanData({ app: "neeky-home-designer", version: 5, walls: [] }),
-    /schema 5/,
+    () => importPlanData({ app: "neeky-home-designer", version: 6, walls: [] }),
+    /schema 6/,
   );
 });

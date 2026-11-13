@@ -2,6 +2,7 @@ import { SNAP, STORAGE_BACKUP_KEY, STORAGE_KEY } from "./constants.js";
 import { cloneFurn } from "./furniture.js";
 import { cloneMaterials, defaultMaterials } from "./materials.js";
 import { clonePower, defaultPower } from "./power.js";
+import { cloneRoof, defaultRoof } from "./roof.js";
 import { importPlanData, serializePlan } from "./schema.js";
 
 export function createState() {
@@ -17,6 +18,7 @@ export function createState() {
     equipment: [],
     power: defaultPower(),
     materials: defaultMaterials(),
+    roof: defaultRoof(),
     title: "",
     dimMode: "centreline",
     tool: "wall",
@@ -53,6 +55,7 @@ export function snapshot(state) {
     equipment: (state.equipment || []).map((e) => ({ ...e })),
     power: clonePower(state.power),
     materials: cloneMaterials(state.materials),
+    roof: cloneRoof(state.roof),
     title: state.title || "",
   };
 }
@@ -69,6 +72,7 @@ export function applySnapshot(state, s) {
   state.equipment = (s.equipment || []).map((e) => ({ ...e }));
   state.power = clonePower(s.power);
   state.materials = cloneMaterials(s.materials);
+  state.roof = cloneRoof(s.roof);
   state.title = s.title || "";
 }
 

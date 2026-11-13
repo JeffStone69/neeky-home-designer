@@ -1,6 +1,7 @@
 import { COLORS, MAJOR, MINOR } from "./constants.js";
 import { deckCorners, elementPoints, normalizeDeck, stepCorners } from "./elements.js";
 import { EQUIP, equipmentCorners, normalizeEquip } from "./power.js";
+import { roofModel } from "./roof.js";
 import { drawFurniture2d } from "./furniture.js";
 import {
   dimensionBox,
@@ -269,6 +270,26 @@ export function createPlan2D(canvas, getState, actions) {
     ctx.restore();
   }
 
+  function drawRoof(cam) {
+    const model = roofModel(getState().walls, getState().roof);
+    if (!model) return;
+    polyScreen(model.outline, cam);
+    ctx.save();
+    ctx.strokeStyle = COLORS.muted;
+    ctx.lineWidth = 1.25;
+    ctx.setLineDash([6, 4]);
+    ctx.stroke();
+    if (model.ridge) {
+      const a = toScreen(model.ridge[0], cam);
+      const b = toScreen(model.ridge[1], cam);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   function draw() {
     const s = getState();
     if (!ctx || w < 2) return;
@@ -277,6 +298,7 @@ export function createPlan2D(canvas, getState, actions) {
     ctx.fillRect(0, 0, w, h);
     const cam = s.camera2d;
     drawGrid(cam);
+    drawRoof(cam);
 
     for (const d of s.decks || []) {
       const on = s.selection?.kind === "deck" && s.selection.id === d.id;
@@ -455,7 +477,8 @@ export function createPlan2D(canvas, getState, actions) {
 
   function fit() {
     const s = getState();
-    const b = sceneBounds(s.walls, elementPoints(s));
+    const roofPts = roofModel(s.walls, s.roof)?.outline || [];
+    const b = sceneBounds(s.walls, elementPoints(s).concat(roofPts));
     if (!b) {
       actions.setCamera2d({ x: 6, z: 5, zoom: 42 });
       return;

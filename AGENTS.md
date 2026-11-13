@@ -33,9 +33,12 @@ Saved plans are JSON, metres, `app: "neeky-home-designer"`.
 - Schema **1** is a file with no `version` (v1.0 / v1.2). It migrates on open.
 - Schema **2** adds decks, steps, stumps, `dimMode`, and `title`. It migrates on open.
 - Schema **3** adds `power` (solar sizing inputs) and `equipment` (`array`, `battery`, `inverter`, `charger`, `generator`). It migrates on open.
-- Schema **4** is the current file (`version: 4`). It adds `materials.wastage` (default 0.10). A newer `version` is rejected with an error; the open plan is left alone.
+- Schema **4** adds `materials.wastage` (default 0.10). It migrates on open.
+- Schema **5** is the current file (`version: 5`). It adds `roof`. A newer `version` is rejected with an error; the open plan is left alone.
 
-Later roof, electrical, plumbing, elevations, and site layers should be new keys on the plan, with a migration in `js/schema.js`. Do not overload `equipment` or `materials`. Sizing maths live in `js/power.js` and `js/materials.js` and stay free of `document`.
+Later electrical, plumbing, elevations, and site layers should be new keys on the plan, with a migration in `js/schema.js`. Do not overload `equipment`, `materials`, or `roof`. Sizing maths live in `js/power.js`, `js/materials.js`, and `js/roof.js` and stay free of `document`.
+
+`roof`: `{shape: "skillion"|"gable", pitch, eave, gable, high, rainfall}`. `pitch` is degrees. `eave` and `gable` are metres (the panel edits millimetres). `high` is the skillion high side: `north`, `south`, `east`, or `west`. `rainfall` is millimetres per year. A missing roof migrates to a 15° south-high skillion with 300 mm eaves, 200 mm gable overhangs, and 1600 mm of rain.
 
 Walls are centreline segments `{a:[x,z], b:[x,z]}`. Openings point at a wall by `wallIndex` and a centre parameter `t`. Rooms are labels (`name`, `labelAt`), not geometry. Furniture types are `plant`, `sofa`, `bed`, `table`, `bench`, `robe`, `wc`, `tank`.
 

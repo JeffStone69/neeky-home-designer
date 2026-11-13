@@ -38,12 +38,15 @@ import {
   shellHtml,
   materialsFormHtml,
   materialsResultHtml,
+  roofFormHtml,
+  roofResultHtml,
   solarFormHtml,
   solarResultHtml,
   statusBarHtml,
 } from "./panels.js";
 import { cloneMaterials, takeoff } from "./materials.js";
 import { EQUIP, MOUNTS, TINY_HOME_APPLIANCES, clonePower, powerInspectorText, powerStatusLine, sizePower } from "./power.js";
+import { cloneRoof, roofFitCount, roofModel } from "./roof.js";
 import { serializePlan } from "./schema.js";
 import { applySnapshot, checkpoint, createPersist, createState, keepUnreadableAutosave, readAutosave, snapshot } from "./store.js";
 
@@ -164,6 +167,7 @@ export function mount(root) {
     state.equipment = (norm.equipment || []).map((e) => ({ ...e }));
     state.power = clonePower(norm.power);
     state.materials = cloneMaterials(plan.materials);
+    state.roof = cloneRoof(plan.roof);
     state.title = plan.title || "";
     if (plan.dimMode) state.dimMode = plan.dimMode;
     state.chain = null;
@@ -555,7 +559,7 @@ export function mount(root) {
     else if (state.tool === "stumps") extra = " · click to place a stump";
     else if (state.tool === "array") extra = " · drag the array rectangle";
     else if (EQUIP[state.tool]) extra = ` · click to place the ${EQUIP[state.tool].label.toLowerCase()}`;
-    const solar = powerStatusLine(state.power, state.equipment);
+    const solar = powerStatusLine(state.power, state.equipment, powerOpts());
     if (solar) extra += ` · ${solar}`;
     if (state.note) extra += ` · ${state.note}`;
     const summary = `${state.rooms.length} rooms · net ${fmtArea(net)} · GFA ${fmtArea(gfa)}${extra}`;
@@ -621,6 +625,7 @@ export function mount(root) {
       ["array", "battery", "inverter", "charger", "generator"].includes(state.tool) || (!pop.hidden && !!pop.querySelector("#solar-form")),
     );
     $("#materials-btn")?.classList.toggle("active", !pop.hidden && !!pop.querySelector("#materials-form"));
+    $("#roof-btn")?.classList.toggle("active", !pop.hidden && !!pop.querySelector("#roof-form"));
     root.querySelectorAll("[data-furn]").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.furn === state.furnish);
     });
@@ -679,7 +684,7 @@ export function mount(root) {
   function hidePop() {
     pop.hidden = true;
     pop.innerHTML = "";
-    pop.classList.remove("solar-open", "materials-open");
+    pop.classList.remove("solar-open", "materials-open", "roof-open");
     syncTools();
   }
 
@@ -895,6 +900,10 @@ export function mount(root) {
     });
   }
 
+  function powerOpts() {
+    return { roofFit: roofFitCount(state.walls, state.roof, state.power?.panelArea) };
+  }
+
   function solarPopover(anchor) {
     if (!state.power?.configured) {
       checkpoint(state);
@@ -903,9 +912,9 @@ export function mount(root) {
     }
     const refreshResult = () => {
       const el = pop.querySelector("#solar-result");
-      if (el) el.innerHTML = solarResultHtml(sizePower(state.power));
+      if (el) el.innerHTML = solarResultHtml(sizePower(state.power, powerOpts()));
     };
-    showPop(anchor, solarFormHtml(state.power, solarResultHtml(sizePower(state.power))), 420);
+    showPop(anchor, solarFormHtml(state.power, solarResultHtml(sizePower(state.power, powerOpts()))), 420);
     pop.classList.add("solar-open");
     const form = pop.querySelector("#solar-form");
     const apply = () => {
@@ -987,6 +996,59 @@ export function mount(root) {
     form.addEventListener("submit", (e) => e.preventDefault());
     form.addEventListener("input", apply);
     form.addEventListener("change", apply);
+    syncTools();
+  }
+
+  function readRoof(form, prev) {
+    const shape = form.querySelector("[data-shape].active")?.dataset.shape === "gable" ? "gable" : "skillion";
+    const high = form.querySelector("[data-high].active")?.dataset.high || prev.high;
+    return cloneRoof({
+      shape,
+      high,
+      pitch: readNum(form, "pitch", prev.pitch),
+      eave: readNum(form, "eaveMm", prev.eave * 1000) / 1000,
+      gable: readNum(form, "gableMm", prev.gable * 1000) / 1000,
+      rainfall: readNum(form, "rainfall", prev.rainfall),
+    });
+  }
+
+  function roofPopover(anchor) {
+    const view = () => roofResultHtml(roofModel(state.walls, state.roof), roofFitCount(state.walls, state.roof, state.power?.panelArea));
+    const refreshResult = () => {
+      const el = pop.querySelector("#roof-result");
+      if (el) el.innerHTML = view();
+    };
+    showPop(anchor, roofFormHtml(state.roof, view()), 420);
+    pop.classList.add("roof-open");
+    const form = pop.querySelector("#roof-form");
+    let drafted = false;
+    const apply = () => {
+      const next = readRoof(form, state.roof);
+      const highRow = form.querySelector("#roof-high");
+      if (highRow) highRow.hidden = next.shape !== "skillion";
+      if (JSON.stringify(next) === JSON.stringify(cloneRoof(state.roof))) {
+        refreshResult();
+        return;
+      }
+      if (!drafted) {
+        checkpoint(state);
+        drafted = true;
+      }
+      state.roof = next;
+      refreshResult();
+      render();
+      persist.persist();
+    };
+    form.addEventListener("submit", (e) => e.preventDefault());
+    form.addEventListener("input", apply);
+    form.addEventListener("change", apply);
+    form.querySelectorAll("[data-shape], [data-high]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const key = btn.dataset.shape ? "shape" : "high";
+        form.querySelectorAll(`[data-${key}]`).forEach((other) => other.classList.toggle("active", other === btn));
+        apply();
+      });
+    });
     syncTools();
   }
 
@@ -1223,7 +1285,7 @@ export function mount(root) {
         bits.push(inspField("tilt", "Tilt °", fieldValue(obj, "tilt")));
         bits.push(inspField("azimuth", "Azimuth °", fieldValue(obj, "azimuth"), true));
       }
-      bits.push(`<p class="insp-read">${escapeHtml(powerInspectorText(state.power))}</p>`);
+      bits.push(`<p class="insp-read">${escapeHtml(powerInspectorText(state.power, powerOpts()))}</p>`);
       return bits.join("");
     }
     if (obj.type === "tank") return `${nameField(fieldValue(obj, "name"))}<p class="insp-read">1.80 × 0.60 m · snaps to a wall</p>`;
@@ -1455,6 +1517,7 @@ export function mount(root) {
     if (e.target.closest("#gen-btn")) genPopover(e.target.closest("#gen-btn"));
     if (e.target.closest("#solar-btn")) solarPopover(e.target.closest("#solar-btn"));
     if (e.target.closest("#materials-btn")) materialsPopover(e.target.closest("#materials-btn"));
+    if (e.target.closest("#roof-btn")) roofPopover(e.target.closest("#roof-btn"));
     if (e.target.closest("#furnish-btn")) setTool(state.tool === "furnish" ? "select" : "furnish");
     const furn = e.target.closest("[data-furn]");
     if (furn) {
@@ -1612,7 +1675,7 @@ export function mount(root) {
   }
 
   document.addEventListener("pointerdown", (e) => {
-    if (!pop.hidden && !pop.contains(e.target) && !e.target.closest("#gen-btn, #solar-btn, #materials-btn, #file-btn, [data-tool=room]")) hidePop();
+    if (!pop.hidden && !pop.contains(e.target) && !e.target.closest("#gen-btn, #solar-btn, #materials-btn, #roof-btn, #file-btn, [data-tool=room]")) hidePop();
     const menu = $("#ctx-menu");
     if (menu && !menu.hidden && !menu.contains(e.target) && !e.target.closest("#insp-more")) hideMenu();
   });

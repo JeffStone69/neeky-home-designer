@@ -271,7 +271,8 @@
 }
 
 .popover.solar-open,
-.popover.materials-open {
+.popover.materials-open,
+.popover.roof-open {
   max-height: min(860px, calc(100dvh - 72px));
 }
 
