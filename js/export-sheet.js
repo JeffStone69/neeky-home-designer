@@ -12,6 +12,7 @@ import {
 } from "./geom.js";
 import { materialsSheetLines } from "./materials.js";
 import { equipmentCorners, powerSheetLines } from "./power.js";
+import { roofFitCount, roofModel } from "./roof.js";
 
 const A3 = { w: 420, h: 297 };
 
@@ -25,6 +26,11 @@ export function planEntities(state) {
   const poly = (layer, pts) => entities.push({ kind: "poly", layer, pts: pts.map((p) => [...p]) });
   const text = (layer, at, value, h = 0.18) => entities.push({ kind: "text", layer, at: [...at], text: String(value), h });
 
+  const roof = roofModel(state.walls, state.roof);
+  if (roof) {
+    poly("ROOF", roof.outline);
+    if (roof.ridge) line("ROOF", roof.ridge[0], roof.ridge[1]);
+  }
   for (const d of state.decks || []) {
     const c = deckCorners(d);
     poly(d.kind === "veranda" ? "VERANDA" : "DECK", c);
@@ -201,6 +207,10 @@ export function layoutSheet(state, opts = {}) {
     }
   }
   for (const e of entities) {
+    if (e.kind === "poly" && e.layer === "ROOF") strokeClosed(e.pts.map(map), "#6b6459", 0.35);
+    else if (e.kind === "line" && e.layer === "ROOF") stroke([map(e.a), map(e.b)], "#6b6459", 0.3);
+  }
+  for (const e of entities) {
     if (e.kind === "line" && e.layer === "WALLS") {
       stroke([map(e.a), map(e.b)], "#1c1917", Math.max(0.6, WALL_THICK * mmPerM));
     }
@@ -297,7 +307,9 @@ export function layoutSheet(state, opts = {}) {
     lines.forEach((text, i) => label(x0 + 2, y0 + 2.6 + i * rowH, text, 2.45, "start", i === 0 ? 600 : 400));
     stackTop = y0 - 3;
   };
-  placeBox(powerSheetLines(state.power, state.equipment));
+  placeBox(powerSheetLines(state.power, state.equipment, {
+    roofFit: roofFitCount(state.walls, state.roof, state.power?.panelArea),
+  }));
   placeBox(materialsSheetLines(state));
   return { w: paperW, h: paperH, scale, items };
 }

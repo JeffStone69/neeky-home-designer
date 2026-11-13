@@ -135,7 +135,7 @@ function maxApplianceKw(list) {
   return m;
 }
 
-export function sizePower(raw) {
+export function sizePower(raw, opts = {}) {
   const p = normalizePower(raw);
   const houseKwh = p.source === "appliances" ? applianceKwh(p.appliances) : p.dailyKwh;
   const evKwh = p.includeEv ? p.evKw * p.evHours : 0;
@@ -154,7 +154,12 @@ export function sizePower(raw) {
     }
   }
   const fitCount = p.panelArea > 0 ? Math.floor((p.availableArea + 1e-9) / p.panelArea) : 0;
-  const panelCount = neededCount == null ? 0 : Math.min(neededCount, Math.max(0, fitCount));
+  const roofFit =
+    opts.roofFit == null || !Number.isFinite(Number(opts.roofFit))
+      ? null
+      : Math.max(0, Math.floor(Number(opts.roofFit) + 1e-9));
+  const uncapped = neededCount == null ? 0 : Math.min(neededCount, Math.max(0, fitCount));
+  const panelCount = roofFit == null ? uncapped : Math.min(uncapped, roofFit);
   const arrayKw = panelCount * panelKw;
   const expectedDailyKwh = arrayKw * p.peakSunHours * derate;
   const usableKwh = dailyKwh * p.autonomyDays;
@@ -174,6 +179,8 @@ export function sizePower(raw) {
     requiredKw,
     neededCount,
     fitCount,
+    roofFit,
+    roofCapped: roofFit != null && panelCount < uncapped,
     panelCount,
     arrayKw,
     expectedDailyKwh,
@@ -200,15 +207,15 @@ export function formatNum(n, digits = 2) {
   return (Math.round(Number(n) * f) / f).toFixed(digits);
 }
 
-export function powerStatusLine(power, equipment) {
+export function powerStatusLine(power, equipment, opts) {
   if (!powerIsActive(power, equipment)) return "";
-  const r = sizePower(power);
+  const r = sizePower(power, opts);
   const battery = r.nominalKwh == null ? r.usableKwh : r.nominalKwh;
   return `solar ${formatNum(r.arrayKw)} kW · battery ${formatNum(battery)} kWh`;
 }
 
-export function powerInspectorText(power) {
-  const r = sizePower(power);
+export function powerInspectorText(power, opts) {
+  const r = sizePower(power, opts);
   const nominal = r.nominalKwh == null ? "-" : `${formatNum(r.nominalKwh)} kWh`;
   return `${r.panelCount} panels · ${formatNum(r.arrayKw)} kW · ${formatNum(r.expectedDailyKwh)} kWh/day · battery ${formatNum(r.usableKwh)} / ${nominal} · inverter ${formatNum(r.inverterKw)} kW · generator ${formatNum(r.generatorKva)} kVA`;
 }
@@ -229,9 +236,9 @@ export function wrapWords(text, max) {
   return lines;
 }
 
-export function powerSheetLines(power, equipment) {
+export function powerSheetLines(power, equipment, opts) {
   if (!powerIsActive(power, equipment)) return [];
-  const r = sizePower(power);
+  const r = sizePower(power, opts);
   const nominal = r.nominalKwh == null ? "-" : `${formatNum(r.nominalKwh)} kWh`;
   const lines = [
     "Power",
@@ -246,7 +253,9 @@ export function powerSheetLines(power, equipment) {
     `Inverter ${formatNum(r.inverterKw)} kW`,
     `Generator ${formatNum(r.generatorKva)} kVA`,
   ];
-  if (r.shortfall) lines.push(`Fits ${r.panelCount} of ${r.neededCount == null ? "-" : r.neededCount} panels`);
+  if (r.roofFit != null) lines.push(`Roof fits ${r.roofFit} panels`);
+  if (r.roofCapped) lines.push(`Roof caps the array at ${r.panelCount} of ${r.neededCount == null ? "-" : r.neededCount}`);
+  else if (r.shortfall) lines.push(`Fits ${r.panelCount} of ${r.neededCount == null ? "-" : r.neededCount} panels`);
   lines.push(...wrapWords(POWER_NOTE, 40));
   return lines;
 }

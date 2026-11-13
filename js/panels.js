@@ -3,6 +3,7 @@ import { FURN, furnLabel } from "./furniture.js";
 import { fmtArea, internalArea } from "./geom.js";
 import { MATERIALS_LIMIT, MATERIALS_NOTE, cutLabel } from "./materials.js";
 import { EQUIP, POWER_NOTE, SUNSHINE_COAST_PSH, formatNum } from "./power.js";
+import { ROOF_LIMIT, SOLAR_SETBACK, defaultRoof } from "./roof.js";
 
 export const ICONS = {
   select: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 4 l14 8 -8 2 -2 8 z"/></svg>`,
@@ -17,6 +18,7 @@ export const ICONS = {
   gen: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 4 v3 M12 17 v3 M4 12 h3 M17 12 h3"/><circle cx="12" cy="12" r="4.5"/></svg>`,
   solar: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="7" r="2.1"/><path d="M8 2.6 v1.5 M8 9.8 v1.4 M3.4 7 H4.9 M11.1 7 h1.5 M4.6 3.6 l1 1 M11.4 3.6 l-1 1"/><path d="M3 15.2 h18 l-1.4 4 H4.4 z"/></svg>`,
   materials: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 10 h16 M4 15 h16 M10 4 v16"/></svg>`,
+  roof: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 13 L12 5 L21 13"/><path d="M6 13 V19 H18 V13"/></svg>`,
   undo: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 8 H5 v3"/><path d="M6 10 c2-4 12-4 14 3"/></svg>`,
   redo: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M16 8 h3 v3"/><path d="M18 10 c-2-4 -12-4 -14 3"/></svg>`,
   file: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M7 4 h7 l5 5 v11 H7z"/><path d="M14 4 v5 h5"/></svg>`,
@@ -62,6 +64,7 @@ export function shellHtml() {
         <button type="button" class="tool" id="furnish-btn" title="Furnish">${ICONS.furnish}<span>Furnish</span></button>
         <button type="button" class="tool" id="solar-btn" title="Solar">${ICONS.solar}<span>Solar</span></button>
         <button type="button" class="tool" id="materials-btn" title="Materials">${ICONS.materials}<span>Materials</span></button>
+        <button type="button" class="tool" id="roof-btn" title="Roof">${ICONS.roof}<span>Roof</span></button>
         <button type="button" class="tool" id="gen-btn" title="Generate">${ICONS.gen}<span>Generate</span></button>
       </div>
       <div class="cluster view-cluster">
@@ -149,15 +152,22 @@ function solarInput(name, label, value, span) {
 
 export function solarResultHtml(result) {
   const nominal = result.nominalKwh == null ? "-" : `${formatNum(result.nominalKwh)} kWh nominal`;
-  const short = result.shortfall
-    ? `<p>Available area fits ${result.panelCount} of ${result.neededCount == null ? "-" : result.neededCount} panels.</p>`
-    : "";
+  const roof =
+    result.roofFit == null
+      ? ""
+      : `<p>Roof fits ${result.roofFit} panels after a ${Math.round(SOLAR_SETBACK * 1000)} mm edge setback.</p>`;
+  const short = result.roofCapped
+    ? `<p>The roof caps the array at ${result.panelCount} of ${result.neededCount == null ? "-" : result.neededCount} panels.</p>`
+    : result.shortfall
+      ? `<p>Available area fits ${result.panelCount} of ${result.neededCount == null ? "-" : result.neededCount} panels.</p>`
+      : "";
   const ev = result.evKwh > 0 ? ` including ${formatNum(result.evKwh)} kWh for the EV` : "";
   return `<strong>${result.panelCount} panels · ${formatNum(result.arrayKw)} kW</strong>
     <p>${formatNum(result.expectedDailyKwh)} kWh/day · ${formatNum(result.expectedYearlyKwh, 0)} kWh/year</p>
     <p>Battery ${formatNum(result.usableKwh)} kWh usable · ${nominal} · DoD ${formatNum(result.dod * 100, 0)}%</p>
     <p>Inverter ${formatNum(result.inverterKw)} kW · generator ${formatNum(result.generatorKva)} kVA</p>
     <p>Daily load ${formatNum(result.dailyKwh)} kWh${ev}</p>
+    ${roof}
     ${short}
     <p class="solar-note">${escapeHtml(POWER_NOTE)}</p>`;
 }
@@ -206,7 +216,7 @@ export function solarFormHtml(power, resultHtml) {
       <button type="button" class="chip" data-place="charger">EV charger</button>
       <button type="button" class="chip" data-place="generator">Generator</button>
     </div>
-    <p class="solar-note">No roof yet. An array sits on the ground, on a deck, or on a flat area. Azimuth 0 faces north.</p>
+    <p class="solar-note">The roof fit caps how many panels the array can use. An array still sits on the ground, on a deck, or on a flat area. Azimuth 0 faces north.</p>
   </form>`;
 }
 
@@ -219,8 +229,90 @@ export function materialsResultHtml(result) {
     <p>Cladding ${formatNum(result.claddingOrder)} m²</p>
     <p>Floor ${formatNum(result.floorArea)} m² · ${result.floorSheets} sheets</p>
     ${cutBlock}
+    ${(result.roof ? roofOrderParagraphs(result.roof) : "")}
     <p class="solar-note">${escapeHtml(MATERIALS_NOTE)}</p>
     <p class="solar-note">${escapeHtml(MATERIALS_LIMIT)}</p>`;
+}
+
+function roofOrderParagraphs(roof) {
+  const shape = roof.shape === "gable" ? "Gable" : "Skillion";
+  const pitch = formatNum(roof.pitch, roof.pitch % 1 ? 1 : 0);
+  const planes = roof.planes.map((plane) => `<p>Plane ${formatNum(plane.area)} m² ${escapeHtml(plane.face)}</p>`).join("");
+  const flash =
+    roof.ridgeLength > 0
+      ? `<p>Ridge flashing ${formatNum(roof.ridgeLength)} m</p>`
+      : `<p>Apron flashing ${formatNum(roof.flashingLength)} m</p>`;
+  const gutters = roof.gutters
+    .map((gutter) => `<p>Gutter ${escapeHtml(gutter.face)} ${formatNum(gutter.length)} m</p>`)
+    .join("");
+  return `<p>Roof ${shape} ${pitch}°</p>
+    ${planes}
+    <p>Rafters ${roof.raftersOrder} × ${formatNum(roof.rafterLength)} m</p>
+    <p>Battens ${roof.battensOrder} × ${formatNum(roof.battenLength)} m</p>
+    <p>Sheets ${roof.sheetsOrder} × ${formatNum(roof.sheetLength)} m</p>
+    ${flash}
+    ${gutters}
+    <p>Downpipes ${roof.downpipes}</p>
+    <p>Rain ${formatNum(roof.litres, 0)} L/year</p>`;
+}
+
+export function roofResultHtml(model, fitCount) {
+  if (!model) {
+    return `<p>Draw walls to size a roof.</p>
+      <p class="solar-note">${escapeHtml(ROOF_LIMIT)}</p>
+      <p class="solar-note">${escapeHtml(POWER_NOTE)}</p>`;
+  }
+  const shape = model.shape === "gable" ? "Gable" : "Skillion";
+  const pitch = formatNum(model.pitch, model.pitch % 1 ? 1 : 0);
+  const planes = model.planes
+    .map((plane) => `<p>${formatNum(plane.area)} m² faces ${escapeHtml(plane.face)}</p>`)
+    .join("");
+  const gutters = model.gutters
+    .map((gutter) => `<p>Gutter ${escapeHtml(gutter.face)} ${formatNum(gutter.length)} m</p>`)
+    .join("");
+  const fit =
+    fitCount == null
+      ? ""
+      : `<p>Solar roof fit ${fitCount} panels, ${Math.round(SOLAR_SETBACK * 1000)} mm from each edge.</p>`;
+  return `<strong>${shape} · ${pitch}°</strong>
+    ${planes}
+    <p>Flat catchment ${formatNum(model.catchment)} m²</p>
+    ${gutters}
+    <p>Downpipes ${model.downpipes}</p>
+    <p>Rain ${formatNum(model.litres, 0)} L/year at ${formatNum(model.rainfall, 0)} mm</p>
+    ${fit}
+    <p class="solar-note">${escapeHtml(ROOF_LIMIT)}</p>
+    <p class="solar-note">${escapeHtml(POWER_NOTE)}</p>`;
+}
+
+function roofChip(attr, value, label, on) {
+  return `<button type="button" class="chip${on ? " active" : ""}" data-${attr}="${value}">${label}</button>`;
+}
+
+export function roofFormHtml(roof, resultHtml) {
+  const r = roof || defaultRoof();
+  const skillion = r.shape !== "gable";
+  const highs = ["north", "south", "east", "west"]
+    .map((side) => roofChip("high", side, side[0].toUpperCase() + side.slice(1), r.high === side))
+    .join("");
+  return `<form class="pop-form" id="roof-form" autocomplete="off">
+    <p class="pop-title">Roof</p>
+    <div class="chips">
+      ${roofChip("shape", "skillion", "Skillion", skillion)}
+      ${roofChip("shape", "gable", "Gable", !skillion)}
+    </div>
+    <div class="solar-grid">
+      ${solarInput("pitch", "Pitch °", formatNum(r.pitch, r.pitch % 1 ? 1 : 0), true)}
+      ${solarInput("eaveMm", "Eave mm", String(Math.round(r.eave * 1000)))}
+      ${solarInput("gableMm", "Gable mm", String(Math.round(r.gable * 1000)))}
+      ${solarInput("rainfall", "Rain mm/year", formatNum(r.rainfall, 0), true)}
+    </div>
+    <div id="roof-high"${skillion ? "" : " hidden"}>
+      <p class="solar-note">High side. The plane faces the opposite way.</p>
+      <div class="chips">${highs}</div>
+    </div>
+    <div id="roof-result" class="solar-result">${resultHtml || ""}</div>
+  </form>`;
 }
 
 export function materialsFormHtml(materials, resultHtml) {

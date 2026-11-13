@@ -118,6 +118,51 @@ test("Belli Park shows a materials list", async ({ page }) => {
   expect(errors, errors.join("\n")).toEqual([]);
 });
 
+test("Belli Park roof shape and pitch update the panel, the plan and the solar cap", async ({ page }) => {
+  const errors = watch(page);
+  await openPlan(page, "/");
+  await page.click('[data-view="plan"]');
+  await page.click("#solar-btn");
+  await page.locator('#solar-form input[name="availableArea"]').fill("500");
+  await page.locator('#solar-form input[name="dailyKwh"]').fill("80");
+  const solar = page.locator("#solar-result");
+  await expect(solar).toContainText("Roof fits");
+  await expect(solar).toContainText("caps the array");
+  await expect(solar).toContainText("Planning estimate only");
+  const fit = async () => Number((await solar.innerText()).match(/Roof fits\s+(\d+)/)[1]);
+  const before = await fit();
+  expect(before).toBeGreaterThan(0);
+
+  await page.click("#roof-btn");
+  const result = page.locator("#roof-result");
+  await expect(result).toBeVisible();
+  await expect(result).toContainText("Skillion");
+  await expect(result).toContainText("Planning estimate only");
+  await expect(result).toContainText("CEC-accredited designer");
+  const roofBefore = await result.innerText();
+  await page.locator('#roof-form [data-shape="gable"]').click();
+  await page.locator('#roof-form input[name="pitch"]').fill("22");
+  await expect(result).toContainText("Gable");
+  await expect(result).toContainText("22");
+  expect(await result.innerText()).not.toBe(roofBefore);
+
+  await page.click("#file-btn");
+  const downloadPromise = page.waitForEvent("download");
+  await page.locator('[data-f="svg"][data-scale="50"]').click();
+  const svg = fs.readFileSync(await (await downloadPromise).path(), "utf8");
+  expect(svg).toContain("Gable 22 deg");
+  expect(svg).toContain("Roof");
+  expect(svg).toContain("Planning estimate only");
+
+  await page.click("#solar-btn");
+  await expect(solar).toContainText("Roof fits");
+  await expect(solar).toContainText("caps the array");
+  const after = await fit();
+  expect(after).toBeGreaterThan(0);
+  expect(after).not.toBe(before);
+  expect(errors, errors.join("\n")).toEqual([]);
+});
+
 test("phone toolbar and plan stay usable", async ({ page }) => {
   const errors = watch(page);
   await page.setViewportSize({ width: 390, height: 844 });

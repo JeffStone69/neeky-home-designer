@@ -5,6 +5,7 @@ import { COLORS, MAJOR, MINOR, WALL_HEIGHT, WALL_THICK } from "./constants.js";
 import { deckCorners, elementPoints, normalizeDeck } from "./elements.js";
 import { EQUIP } from "./power.js";
 import { sceneBounds, wallLen } from "./geom.js";
+import { roofModel } from "./roof.js";
 import { addFurniture3d } from "./furniture.js";
 
 export function createView3D(canvas) {
@@ -249,10 +250,88 @@ export function createView3D(canvas) {
     roomMeshes.push(mesh);
   }
 
+  const roofMat = new THREE.MeshLambertMaterial({ color: 0x8a938c, side: THREE.DoubleSide });
   const timber = new THREE.MeshLambertMaterial({ color: 0xc4a574 });
   const stumpMat = new THREE.MeshLambertMaterial({ color: 0x6b5344 });
   const bearerMat = new THREE.MeshLambertMaterial({ color: 0x5c4636 });
   const stepMat = new THREE.MeshLambertMaterial({ color: 0xd9cbb6 });
+
+  function addPoly(points, material) {
+    const positions = new Float32Array(points.length * 3);
+    points.forEach((p, i) => {
+      positions[i * 3] = p[0];
+      positions[i * 3 + 1] = p[1];
+      positions[i * 3 + 2] = p[2];
+    });
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geo.setIndex(points.length === 4 ? [0, 1, 2, 0, 2, 3] : [0, 1, 2]);
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    house.add(mesh);
+  }
+
+  function addRoof(plan) {
+    const model = roofModel(plan.walls, plan.roof);
+    if (!model) return;
+    const yOf = (x, z) => model.height(x, z);
+    for (const quad of model.quads) addPoly(quad.map(([x, z]) => [x, yOf(x, z), z]), roofMat);
+    const { box } = model;
+    const base = WALL_HEIGHT;
+    if (model.shape === "skillion") {
+      if (model.high === "south" || model.high === "north") {
+        const z = model.high === "south" ? box.minZ : box.maxZ;
+        addPoly(
+          [
+            [box.minX, base, z],
+            [box.maxX, base, z],
+            [box.maxX, yOf(box.maxX, z), z],
+            [box.minX, yOf(box.minX, z), z],
+          ],
+          wallMat,
+        );
+      } else {
+        const x = model.high === "west" ? box.minX : box.maxX;
+        addPoly(
+          [
+            [x, base, box.minZ],
+            [x, base, box.maxZ],
+            [x, yOf(x, box.maxZ), box.maxZ],
+            [x, yOf(x, box.minZ), box.minZ],
+          ],
+          wallMat,
+        );
+      }
+    } else if (model.slopeAxis === "z") {
+      const midZ = (box.minZ + box.maxZ) / 2;
+      const ridge = yOf(box.minX, midZ);
+      for (const x of [box.minX, box.maxX]) {
+        addPoly(
+          [
+            [x, base, box.minZ],
+            [x, ridge, midZ],
+            [x, base, box.maxZ],
+          ],
+          wallMat,
+        );
+      }
+    } else {
+      const midX = (box.minX + box.maxX) / 2;
+      const ridge = yOf(midX, box.minZ);
+      for (const z of [box.minZ, box.maxZ]) {
+        addPoly(
+          [
+            [box.minX, base, z],
+            [midX, ridge, z],
+            [box.maxX, base, z],
+          ],
+          wallMat,
+        );
+      }
+    }
+  }
 
   function addDeck(deck, drop) {
     const r = normalizeDeck(deck);
@@ -371,7 +450,8 @@ export function createView3D(canvas) {
   }
 
   function planBox(plan) {
-    return sceneBounds(plan.walls, elementPoints(plan));
+    const roofPts = roofModel(plan.walls, plan.roof)?.outline || [];
+    return sceneBounds(plan.walls, elementPoints(plan).concat(roofPts));
   }
 
   function rebuild(plan) {
@@ -383,6 +463,7 @@ export function createView3D(canvas) {
     addGrid(b);
     if (stumps.length) addStumps(stumps);
     for (const deck of plan.decks || []) addDeck(deck, drop);
+    addRoof(plan);
     for (const step of plan.steps || []) addSteps(step);
     const selWall = plan.selection?.kind === "wall" ? plan.selection.id : null;
     const selRoom = plan.selection?.kind === "room" ? plan.selection.id : selectedRoomId;

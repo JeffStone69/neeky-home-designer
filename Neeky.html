@@ -316,7 +316,8 @@
 }
 
 .popover.solar-open,
-.popover.materials-open {
+.popover.materials-open,
+.popover.roof-open {
   max-height: min(860px, calc(100dvh - 72px));
 }
 
@@ -1057,7 +1058,7 @@ var init_constants = __esm({
   "js/constants.js"() {
     APP = "neeky-home-designer";
     APP_VERSION_LABEL = "1.3";
-    SCHEMA_VERSION = 4;
+    SCHEMA_VERSION = 5;
     STORAGE_KEY = "neeky-home-designer-v2";
     STORAGE_BACKUP_KEY = "neeky-home-designer-v2-unreadable";
     DIM_MODES = ["centreline", "inside", "outside"];
@@ -1816,7 +1817,7 @@ function maxApplianceKw(list) {
   for (const a of list || []) m = Math.max(m, Math.max(0, Number(a.watts) || 0) / 1e3);
   return m;
 }
-function sizePower(raw) {
+function sizePower(raw, opts = {}) {
   const p = normalizePower(raw);
   const houseKwh = p.source === "appliances" ? applianceKwh(p.appliances) : p.dailyKwh;
   const evKwh = p.includeEv ? p.evKw * p.evHours : 0;
@@ -1835,7 +1836,9 @@ function sizePower(raw) {
     }
   }
   const fitCount = p.panelArea > 0 ? Math.floor((p.availableArea + 1e-9) / p.panelArea) : 0;
-  const panelCount = neededCount == null ? 0 : Math.min(neededCount, Math.max(0, fitCount));
+  const roofFit = opts.roofFit == null || !Number.isFinite(Number(opts.roofFit)) ? null : Math.max(0, Math.floor(Number(opts.roofFit) + 1e-9));
+  const uncapped = neededCount == null ? 0 : Math.min(neededCount, Math.max(0, fitCount));
+  const panelCount = roofFit == null ? uncapped : Math.min(uncapped, roofFit);
   const arrayKw = panelCount * panelKw;
   const expectedDailyKwh = arrayKw * p.peakSunHours * derate;
   const usableKwh = dailyKwh * p.autonomyDays;
@@ -1855,6 +1858,8 @@ function sizePower(raw) {
     requiredKw,
     neededCount,
     fitCount,
+    roofFit,
+    roofCapped: roofFit != null && panelCount < uncapped,
     panelCount,
     arrayKw,
     expectedDailyKwh,
@@ -1878,14 +1883,14 @@ function formatNum(n, digits = 2) {
   const f = 10 ** digits;
   return (Math.round(Number(n) * f) / f).toFixed(digits);
 }
-function powerStatusLine(power, equipment) {
+function powerStatusLine(power, equipment, opts) {
   if (!powerIsActive(power, equipment)) return "";
-  const r = sizePower(power);
+  const r = sizePower(power, opts);
   const battery = r.nominalKwh == null ? r.usableKwh : r.nominalKwh;
   return `solar ${formatNum(r.arrayKw)} kW · battery ${formatNum(battery)} kWh`;
 }
-function powerInspectorText(power) {
-  const r = sizePower(power);
+function powerInspectorText(power, opts) {
+  const r = sizePower(power, opts);
   const nominal = r.nominalKwh == null ? "-" : `${formatNum(r.nominalKwh)} kWh`;
   return `${r.panelCount} panels · ${formatNum(r.arrayKw)} kW · ${formatNum(r.expectedDailyKwh)} kWh/day · battery ${formatNum(r.usableKwh)} / ${nominal} · inverter ${formatNum(r.inverterKw)} kW · generator ${formatNum(r.generatorKva)} kVA`;
 }
@@ -1904,9 +1909,9 @@ function wrapWords(text, max) {
   if (cur) lines.push(cur);
   return lines;
 }
-function powerSheetLines(power, equipment) {
+function powerSheetLines(power, equipment, opts) {
   if (!powerIsActive(power, equipment)) return [];
-  const r = sizePower(power);
+  const r = sizePower(power, opts);
   const nominal = r.nominalKwh == null ? "-" : `${formatNum(r.nominalKwh)} kWh`;
   const lines = [
     "Power",
@@ -1921,7 +1926,9 @@ function powerSheetLines(power, equipment) {
     `Inverter ${formatNum(r.inverterKw)} kW`,
     `Generator ${formatNum(r.generatorKva)} kVA`
   ];
-  if (r.shortfall) lines.push(`Fits ${r.panelCount} of ${r.neededCount == null ? "-" : r.neededCount} panels`);
+  if (r.roofFit != null) lines.push(`Roof fits ${r.roofFit} panels`);
+  if (r.roofCapped) lines.push(`Roof caps the array at ${r.panelCount} of ${r.neededCount == null ? "-" : r.neededCount}`);
+  else if (r.shortfall) lines.push(`Fits ${r.panelCount} of ${r.neededCount == null ? "-" : r.neededCount} panels`);
   lines.push(...wrapWords(POWER_NOTE, 40));
   return lines;
 }
@@ -2779,6 +2786,257 @@ var init_furniture = __esm({
   }
 });
 
+// js/roof.js
+function finite2(v, fallback) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+function clamp2(n, lo, hi) {
+  return Math.min(hi, Math.max(lo, n));
+}
+function roundMm(n) {
+  return Math.round(n * 1e3) / 1e3;
+}
+function defaultRoof() {
+  return {
+    shape: "skillion",
+    pitch: DEFAULT_PITCH,
+    eave: DEFAULT_EAVE,
+    gable: DEFAULT_GABLE,
+    high: "south",
+    rainfall: DEFAULT_RAINFALL
+  };
+}
+function normalizeRoof(raw) {
+  const d = defaultRoof();
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return d;
+  return {
+    shape: raw.shape === "gable" ? "gable" : "skillion",
+    pitch: clamp2(finite2(raw.pitch, d.pitch), 0, 60),
+    eave: clamp2(finite2(raw.eave, d.eave), 0, 2),
+    gable: clamp2(finite2(raw.gable, d.gable), 0, 2),
+    high: ROOF_HIGHS.includes(raw.high) ? raw.high : d.high,
+    rainfall: clamp2(finite2(raw.rainfall, d.rainfall), 0, 1e4)
+  };
+}
+function cloneRoof(raw) {
+  return normalizeRoof(raw);
+}
+function gridCount(length, spacing) {
+  if (!(length > 1e-6)) return 0;
+  return Math.ceil(length / spacing - 1e-9) + 1;
+}
+function downpipesFor(length) {
+  if (!(length > 1e-6)) return 0;
+  return Math.max(1, Math.ceil(length / DOWNPIPE_RUN - 1e-9));
+}
+function heightAt(spec, x, z) {
+  const { shape, slopeAxis, high, box, tan } = spec;
+  if (shape === "skillion") {
+    if (slopeAxis === "z") {
+      if (high === "south") return WALL_HEIGHT + (box.maxZ - z) * tan;
+      return WALL_HEIGHT + (z - box.minZ) * tan;
+    }
+    if (high === "west") return WALL_HEIGHT + (box.maxX - x) * tan;
+    return WALL_HEIGHT + (x - box.minX) * tan;
+  }
+  if (slopeAxis === "z") {
+    const mid2 = (box.minZ + box.maxZ) / 2;
+    return WALL_HEIGHT + (box.h / 2 - Math.abs(z - mid2)) * tan;
+  }
+  const mid = (box.minX + box.maxX) / 2;
+  return WALL_HEIGHT + (box.w / 2 - Math.abs(x - mid)) * tan;
+}
+function roofModel(walls, roof) {
+  const box = dimensionBox(walls || [], "outside");
+  if (!box || !(box.w > 1e-6) || !(box.h > 1e-6)) return null;
+  const spec = normalizeRoof(roof);
+  const slopeAxis = spec.shape === "gable" ? box.w >= box.h ? "z" : "x" : spec.high === "east" || spec.high === "west" ? "x" : "z";
+  const span = slopeAxis === "z" ? box.h : box.w;
+  const cross = slopeAxis === "z" ? box.w : box.h;
+  const along = roundMm(cross + 2 * spec.gable);
+  const run = roundMm(span + 2 * spec.eave);
+  const pitchRad = spec.pitch * Math.PI / 180;
+  const cos = Math.cos(pitchRad) || 1;
+  const tan = Math.tan(pitchRad);
+  const slope = roundMm(run / cos);
+  const area2 = roundMm(slope * along);
+  const eavePad = slopeAxis === "z" ? spec.eave : spec.gable;
+  const vergePad = slopeAxis === "z" ? spec.gable : spec.eave;
+  const minX = box.minX - vergePad;
+  const maxX = box.maxX + vergePad;
+  const minZ = box.minZ - eavePad;
+  const maxZ = box.maxZ + eavePad;
+  const outline = [
+    [minX, minZ],
+    [maxX, minZ],
+    [maxX, maxZ],
+    [minX, maxZ]
+  ];
+  let planes;
+  let quads;
+  let ridge = null;
+  if (spec.shape === "gable") {
+    const halfRun = roundMm(span / 2 + spec.eave);
+    const halfSlope = roundMm(halfRun / cos);
+    const halfArea = roundMm(halfSlope * along);
+    if (slopeAxis === "z") {
+      const midZ = (box.minZ + box.maxZ) / 2;
+      planes = [
+        { face: "south", slope: halfSlope, along, area: halfArea },
+        { face: "north", slope: halfSlope, along, area: halfArea }
+      ];
+      quads = [
+        [
+          [minX, minZ],
+          [maxX, minZ],
+          [maxX, midZ],
+          [minX, midZ]
+        ],
+        [
+          [minX, midZ],
+          [maxX, midZ],
+          [maxX, maxZ],
+          [minX, maxZ]
+        ]
+      ];
+      ridge = [
+        [minX, midZ],
+        [maxX, midZ]
+      ];
+    } else {
+      const midX = (box.minX + box.maxX) / 2;
+      planes = [
+        { face: "west", slope: halfSlope, along, area: halfArea },
+        { face: "east", slope: halfSlope, along, area: halfArea }
+      ];
+      quads = [
+        [
+          [minX, minZ],
+          [midX, minZ],
+          [midX, maxZ],
+          [minX, maxZ]
+        ],
+        [
+          [midX, minZ],
+          [maxX, minZ],
+          [maxX, maxZ],
+          [midX, maxZ]
+        ]
+      ];
+      ridge = [
+        [midX, minZ],
+        [midX, maxZ]
+      ];
+    }
+  } else {
+    planes = [{ face: OPPOSITE[spec.high], slope, along, area: area2 }];
+    quads = [outline];
+  }
+  const usedSlope = planes[0].slope;
+  const rafterCount = gridCount(along, RAFTER_SPACING) * planes.length;
+  const battenCount = gridCount(usedSlope, BATTEN_SPACING) * planes.length;
+  const sheetCount2 = (along > 1e-6 ? Math.ceil(along / COVER_WIDTH - 1e-9) : 0) * planes.length;
+  const gutters = planes.map((plane) => ({ face: plane.face, length: plane.along }));
+  const gutterLength = gutters.reduce((sum, gutter) => sum + gutter.length, 0);
+  const catchment = roundMm(along * run);
+  const heightSpec = { shape: spec.shape, slopeAxis, high: spec.high, box, tan };
+  return {
+    shape: spec.shape,
+    pitch: spec.pitch,
+    high: spec.high,
+    rainfall: spec.rainfall,
+    runoff: RUNOFF,
+    box,
+    slopeAxis,
+    outline,
+    quads,
+    ridge,
+    planes,
+    catchment,
+    litres: catchment * spec.rainfall * RUNOFF,
+    gutters,
+    gutterLength,
+    downpipes: gutters.reduce((sum, gutter) => sum + downpipesFor(gutter.length), 0),
+    rafterLength: usedSlope,
+    rafterCount,
+    battenLength: along,
+    battenCount,
+    sheetLength: usedSlope,
+    sheetCount: sheetCount2,
+    ridgeLength: spec.shape === "gable" ? along : 0,
+    flashingLength: along,
+    height(x, z) {
+      return heightAt(heightSpec, x, z);
+    }
+  };
+}
+function pack(along, slope, a, b) {
+  if (!(along > 0) || !(slope > 0) || !(a > 0) || !(b > 0)) return 0;
+  const n1 = Math.floor((along + 1e-9) / a) * Math.floor((slope + 1e-9) / b);
+  const n2 = Math.floor((along + 1e-9) / b) * Math.floor((slope + 1e-9) / a);
+  return Math.max(0, n1, n2);
+}
+function roofFitCount(walls, roof, panelArea) {
+  const model = roofModel(walls, roof);
+  if (!model) return null;
+  const area2 = Math.max(0, Number(panelArea) || 0);
+  if (!(area2 > 0)) return 0;
+  const base = PANEL_SHORT * PANEL_LONG;
+  const scale = Math.sqrt(area2 / base);
+  const short = PANEL_SHORT * scale;
+  const long = PANEL_LONG * scale;
+  let total = 0;
+  for (const plane of model.planes) {
+    total += pack(plane.along - 2 * SOLAR_SETBACK, plane.slope - 2 * SOLAR_SETBACK, short, long);
+  }
+  return total;
+}
+function roofOrderLines(roof) {
+  if (!roof) return [];
+  const pitch = formatNum(roof.pitch, roof.pitch % 1 ? 1 : 0);
+  const shape = roof.shape === "gable" ? "Gable" : "Skillion";
+  const lines = [
+    "Roof",
+    `${shape} ${pitch} deg`,
+    ...roof.planes.map((plane) => `Plane ${formatNum(plane.area)} m2 ${plane.face}`),
+    `Rafters ${roof.raftersOrder} x ${formatNum(roof.rafterLength)} m`,
+    `Battens ${roof.battensOrder} x ${formatNum(roof.battenLength)} m`,
+    `Sheets ${roof.sheetsOrder} x ${formatNum(roof.sheetLength)} m`
+  ];
+  if (roof.ridgeLength > 0) lines.push(`Ridge flashing ${formatNum(roof.ridgeLength)} m`);
+  else lines.push(`Apron flashing ${formatNum(roof.flashingLength)} m`);
+  for (const gutter of roof.gutters) lines.push(`Gutter ${gutter.face} ${formatNum(gutter.length)} m`);
+  lines.push(`Downpipes ${roof.downpipes}`);
+  lines.push(`Rain ${formatNum(roof.litres, 0)} L`);
+  lines.push(...wrapWords(ROOF_LIMIT, 40));
+  return lines;
+}
+var RAFTER_SPACING, BATTEN_SPACING, COVER_WIDTH, SOLAR_SETBACK, PANEL_SHORT, PANEL_LONG, RUNOFF, DOWNPIPE_RUN, DEFAULT_PITCH, DEFAULT_EAVE, DEFAULT_GABLE, DEFAULT_RAINFALL, ROOF_SHAPES, ROOF_HIGHS, ROOF_LIMIT, OPPOSITE;
+var init_roof = __esm({
+  "js/roof.js"() {
+    init_constants();
+    init_geom();
+    init_power();
+    RAFTER_SPACING = 0.6;
+    BATTEN_SPACING = 0.9;
+    COVER_WIDTH = 0.762;
+    SOLAR_SETBACK = 0.2;
+    PANEL_SHORT = 1.134;
+    PANEL_LONG = 1.762;
+    RUNOFF = 0.9;
+    DOWNPIPE_RUN = 10;
+    DEFAULT_PITCH = 15;
+    DEFAULT_EAVE = 0.3;
+    DEFAULT_GABLE = 0.2;
+    DEFAULT_RAINFALL = 1600;
+    ROOF_SHAPES = ["skillion", "gable"];
+    ROOF_HIGHS = ["north", "south", "east", "west"];
+    ROOF_LIMIT = "Common rafters at 600 mm, not trusses. Battens at 900 mm. Sheets are 762 mm cover. One downpipe per 10 m of gutter. Rain is flat roof area times rainfall times 0.90.";
+    OPPOSITE = { north: "south", south: "north", east: "west", west: "east" };
+  }
+});
+
 // js/vendor/three.module.js
 var three_module_exports = {};
 __export(three_module_exports, {
@@ -3206,7 +3464,7 @@ function generateUUID() {
   const uuid = _lut[d0 & 255] + _lut[d0 >> 8 & 255] + _lut[d0 >> 16 & 255] + _lut[d0 >> 24 & 255] + "-" + _lut[d1 & 255] + _lut[d1 >> 8 & 255] + "-" + _lut[d1 >> 16 & 15 | 64] + _lut[d1 >> 24 & 255] + "-" + _lut[d2 & 63 | 128] + _lut[d2 >> 8 & 255] + "-" + _lut[d2 >> 16 & 255] + _lut[d2 >> 24 & 255] + _lut[d3 & 255] + _lut[d3 >> 8 & 255] + _lut[d3 >> 16 & 255] + _lut[d3 >> 24 & 255];
   return uuid.toLowerCase();
 }
-function clamp2(value, min, max) {
+function clamp3(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 function euclideanModulo(n, m) {
@@ -3527,7 +3785,7 @@ function _generateTables() {
 }
 function toHalfFloat(val) {
   if (Math.abs(val) > 65504) console.warn("THREE.DataUtils.toHalfFloat(): Value out of range.");
-  val = clamp2(val, -65504, 65504);
+  val = clamp3(val, -65504, 65504);
   _tables.floatView[0] = val;
   const f = _tables.uint32View[0];
   const e = f >> 23 & 511;
@@ -11490,7 +11748,7 @@ var init_three_module = __esm({
       DEG2RAD,
       RAD2DEG,
       generateUUID,
-      clamp: clamp2,
+      clamp: clamp3,
       euclideanModulo,
       mapLinear,
       inverseLerp,
@@ -11714,7 +11972,7 @@ var init_three_module = __esm({
         const denominator = Math.sqrt(this.lengthSq() * v.lengthSq());
         if (denominator === 0) return Math.PI / 2;
         const theta = this.dot(v) / denominator;
-        return Math.acos(clamp2(theta, -1, 1));
+        return Math.acos(clamp3(theta, -1, 1));
       }
       distanceTo(v) {
         return Math.sqrt(this.distanceToSquared(v));
@@ -13249,7 +13507,7 @@ var init_three_module = __esm({
         return this.normalize();
       }
       angleTo(q) {
-        return 2 * Math.acos(Math.abs(clamp2(this.dot(q), -1, 1)));
+        return 2 * Math.acos(Math.abs(clamp3(this.dot(q), -1, 1)));
       }
       rotateTowards(q, step) {
         const angle2 = this.angleTo(q);
@@ -13718,7 +13976,7 @@ var init_three_module = __esm({
         const denominator = Math.sqrt(this.lengthSq() * v.lengthSq());
         if (denominator === 0) return Math.PI / 2;
         const theta = this.dot(v) / denominator;
-        return Math.acos(clamp2(theta, -1, 1));
+        return Math.acos(clamp3(theta, -1, 1));
       }
       distanceTo(v) {
         return Math.sqrt(this.distanceToSquared(v));
@@ -15311,7 +15569,7 @@ var init_three_module = __esm({
         const m31 = te[2], m32 = te[6], m33 = te[10];
         switch (order) {
           case "XYZ":
-            this._y = Math.asin(clamp2(m13, -1, 1));
+            this._y = Math.asin(clamp3(m13, -1, 1));
             if (Math.abs(m13) < 0.9999999) {
               this._x = Math.atan2(-m23, m33);
               this._z = Math.atan2(-m12, m11);
@@ -15321,7 +15579,7 @@ var init_three_module = __esm({
             }
             break;
           case "YXZ":
-            this._x = Math.asin(-clamp2(m23, -1, 1));
+            this._x = Math.asin(-clamp3(m23, -1, 1));
             if (Math.abs(m23) < 0.9999999) {
               this._y = Math.atan2(m13, m33);
               this._z = Math.atan2(m21, m22);
@@ -15331,7 +15589,7 @@ var init_three_module = __esm({
             }
             break;
           case "ZXY":
-            this._x = Math.asin(clamp2(m32, -1, 1));
+            this._x = Math.asin(clamp3(m32, -1, 1));
             if (Math.abs(m32) < 0.9999999) {
               this._y = Math.atan2(-m31, m33);
               this._z = Math.atan2(-m12, m22);
@@ -15341,7 +15599,7 @@ var init_three_module = __esm({
             }
             break;
           case "ZYX":
-            this._y = Math.asin(-clamp2(m31, -1, 1));
+            this._y = Math.asin(-clamp3(m31, -1, 1));
             if (Math.abs(m31) < 0.9999999) {
               this._x = Math.atan2(m32, m33);
               this._z = Math.atan2(m21, m11);
@@ -15351,7 +15609,7 @@ var init_three_module = __esm({
             }
             break;
           case "YZX":
-            this._z = Math.asin(clamp2(m21, -1, 1));
+            this._z = Math.asin(clamp3(m21, -1, 1));
             if (Math.abs(m21) < 0.9999999) {
               this._x = Math.atan2(-m23, m22);
               this._y = Math.atan2(-m31, m11);
@@ -15361,7 +15619,7 @@ var init_three_module = __esm({
             }
             break;
           case "XZY":
-            this._z = Math.asin(-clamp2(m12, -1, 1));
+            this._z = Math.asin(-clamp3(m12, -1, 1));
             if (Math.abs(m12) < 0.9999999) {
               this._x = Math.atan2(m32, m22);
               this._y = Math.atan2(m13, m11);
@@ -16397,8 +16655,8 @@ var init_three_module = __esm({
       }
       setHSL(h, s, l, colorSpace = ColorManagement.workingColorSpace) {
         h = euclideanModulo(h, 1);
-        s = clamp2(s, 0, 1);
-        l = clamp2(l, 0, 1);
+        s = clamp3(s, 0, 1);
+        l = clamp3(l, 0, 1);
         if (s === 0) {
           this.r = this.g = this.b = l;
         } else {
@@ -16520,7 +16778,7 @@ var init_three_module = __esm({
       }
       getHex(colorSpace = SRGBColorSpace) {
         ColorManagement.fromWorkingColorSpace(_color.copy(this), colorSpace);
-        return Math.round(clamp2(_color.r * 255, 0, 255)) * 65536 + Math.round(clamp2(_color.g * 255, 0, 255)) * 256 + Math.round(clamp2(_color.b * 255, 0, 255));
+        return Math.round(clamp3(_color.r * 255, 0, 255)) * 65536 + Math.round(clamp3(_color.g * 255, 0, 255)) * 256 + Math.round(clamp3(_color.b * 255, 0, 255));
       }
       getHexString(colorSpace = SRGBColorSpace) {
         return ("000000" + this.getHex(colorSpace).toString(16)).slice(-6);
@@ -24914,13 +25172,13 @@ void main() {
           vec.crossVectors(tangents[i - 1], tangents[i]);
           if (vec.length() > Number.EPSILON) {
             vec.normalize();
-            const theta = Math.acos(clamp2(tangents[i - 1].dot(tangents[i]), -1, 1));
+            const theta = Math.acos(clamp3(tangents[i - 1].dot(tangents[i]), -1, 1));
             normals[i].applyMatrix4(mat.makeRotationAxis(vec, theta));
           }
           binormals[i].crossVectors(tangents[i], normals[i]);
         }
         if (closed === true) {
-          let theta = Math.acos(clamp2(normals[0].dot(normals[segments]), -1, 1));
+          let theta = Math.acos(clamp3(normals[0].dot(normals[segments]), -1, 1));
           theta /= segments;
           if (tangents[0].dot(vec.crossVectors(normals[0], normals[segments])) > 0) {
             theta = -theta;
@@ -25729,7 +25987,7 @@ void main() {
           phiLength
         };
         segments = Math.floor(segments);
-        phiLength = clamp2(phiLength, 0, Math.PI * 2);
+        phiLength = clamp3(phiLength, 0, Math.PI * 2);
         const indices = [];
         const vertices = [];
         const uvs = [];
@@ -27823,7 +28081,7 @@ void main() {
         this.ior = 1.5;
         Object.defineProperty(this, "reflectivity", {
           get: function() {
-            return clamp2(2.5 * (this.ior - 1) / (this.ior + 1), 0, 1);
+            return clamp3(2.5 * (this.ior - 1) / (this.ior + 1), 0, 1);
           },
           set: function(reflectivity) {
             this.ior = (1 + 0.4 * reflectivity) / (1 - 0.4 * reflectivity);
@@ -33181,7 +33439,7 @@ void main() {
           this.phi = 0;
         } else {
           this.theta = Math.atan2(x, z);
-          this.phi = Math.acos(clamp2(y / this.radius, -1, 1));
+          this.phi = Math.acos(clamp3(y / this.radius, -1, 1));
         }
         return this;
       }
@@ -33400,7 +33658,7 @@ void main() {
         const startEnd_startP = _startEnd.dot(_startP);
         let t = startEnd_startP / startEnd2;
         if (clampToLine) {
-          t = clamp2(t, 0, 1);
+          t = clamp3(t, 0, 1);
         }
         return t;
       }
@@ -37301,10 +37559,86 @@ function createView3D(canvas) {
     house.add(mesh);
     roomMeshes.push(mesh);
   }
+  const roofMat = new MeshLambertMaterial({ color: 9081740, side: DoubleSide });
   const timber = new MeshLambertMaterial({ color: 12887412 });
   const stumpMat = new MeshLambertMaterial({ color: 7033668 });
   const bearerMat = new MeshLambertMaterial({ color: 6047286 });
   const stepMat = new MeshLambertMaterial({ color: 14273462 });
+  function addPoly(points, material) {
+    const positions = new Float32Array(points.length * 3);
+    points.forEach((p, i) => {
+      positions[i * 3] = p[0];
+      positions[i * 3 + 1] = p[1];
+      positions[i * 3 + 2] = p[2];
+    });
+    const geo = new BufferGeometry();
+    geo.setAttribute("position", new BufferAttribute(positions, 3));
+    geo.setIndex(points.length === 4 ? [0, 1, 2, 0, 2, 3] : [0, 1, 2]);
+    geo.computeVertexNormals();
+    const mesh = new Mesh(geo, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    house.add(mesh);
+  }
+  function addRoof(plan) {
+    const model = roofModel(plan.walls, plan.roof);
+    if (!model) return;
+    const yOf = (x, z) => model.height(x, z);
+    for (const quad of model.quads) addPoly(quad.map(([x, z]) => [x, yOf(x, z), z]), roofMat);
+    const { box } = model;
+    const base = WALL_HEIGHT;
+    if (model.shape === "skillion") {
+      if (model.high === "south" || model.high === "north") {
+        const z = model.high === "south" ? box.minZ : box.maxZ;
+        addPoly(
+          [
+            [box.minX, base, z],
+            [box.maxX, base, z],
+            [box.maxX, yOf(box.maxX, z), z],
+            [box.minX, yOf(box.minX, z), z]
+          ],
+          wallMat
+        );
+      } else {
+        const x = model.high === "west" ? box.minX : box.maxX;
+        addPoly(
+          [
+            [x, base, box.minZ],
+            [x, base, box.maxZ],
+            [x, yOf(x, box.maxZ), box.maxZ],
+            [x, yOf(x, box.minZ), box.minZ]
+          ],
+          wallMat
+        );
+      }
+    } else if (model.slopeAxis === "z") {
+      const midZ = (box.minZ + box.maxZ) / 2;
+      const ridge = yOf(box.minX, midZ);
+      for (const x of [box.minX, box.maxX]) {
+        addPoly(
+          [
+            [x, base, box.minZ],
+            [x, ridge, midZ],
+            [x, base, box.maxZ]
+          ],
+          wallMat
+        );
+      }
+    } else {
+      const midX = (box.minX + box.maxX) / 2;
+      const ridge = yOf(midX, box.minZ);
+      for (const z of [box.minZ, box.maxZ]) {
+        addPoly(
+          [
+            [box.minX, base, z],
+            [midX, ridge, z],
+            [box.maxX, base, z]
+          ],
+          wallMat
+        );
+      }
+    }
+  }
   function addDeck(deck, drop) {
     const r = normalizeDeck(deck);
     if (r.w < 0.05 || r.d < 0.05) return;
@@ -37416,7 +37750,8 @@ function createView3D(canvas) {
     }
   }
   function planBox(plan) {
-    return sceneBounds(plan.walls, elementPoints(plan));
+    const roofPts = roofModel(plan.walls, plan.roof)?.outline || [];
+    return sceneBounds(plan.walls, elementPoints(plan).concat(roofPts));
   }
   function rebuild(plan) {
     clearHouse();
@@ -37427,6 +37762,7 @@ function createView3D(canvas) {
     addGrid(b);
     if (stumps.length) addStumps(stumps);
     for (const deck of plan.decks || []) addDeck(deck, drop);
+    addRoof(plan);
     for (const step of plan.steps || []) addSteps(step);
     const selWall = plan.selection?.kind === "wall" ? plan.selection.id : null;
     const selRoom = plan.selection?.kind === "room" ? plan.selection.id : selectedRoomId;
@@ -37583,6 +37919,7 @@ var init_view3d = __esm({
     init_elements();
     init_power();
     init_geom();
+    init_roof();
     init_furniture();
   }
 });
@@ -38551,13 +38888,14 @@ init_geom();
 init_constants();
 init_geom();
 init_power();
+init_roof();
 var STUD_SPACING = 0.6;
 var SHEET_W = 1.2;
 var SHEET_H = 2.4;
 var STOCK_LENGTHS = [2.4, 3, 3.6, 4.2, 4.8, 5.4, 6];
 var DEFAULT_WASTAGE = 0.1;
 var MATERIALS_NOTE = POWER_NOTE;
-var MATERIALS_LIMIT = "Studs are the full wall height. No lintels, noggings, roof, or deck.";
+var MATERIALS_LIMIT = "Studs are the full wall height. No lintels, noggings, or deck.";
 var SHEET_AREA = SHEET_W * SHEET_H;
 var MAX_STOCK = STOCK_LENGTHS[STOCK_LENGTHS.length - 1];
 function defaultMaterials() {
@@ -38576,7 +38914,7 @@ function normalizeWastage(value) {
   if (!Number.isFinite(n)) return DEFAULT_WASTAGE;
   return Math.min(1, Math.max(0, n));
 }
-function roundMm(n) {
+function roundMm2(n) {
   return Math.round(n * 1e3) / 1e3;
 }
 function orderCount(count, wastage) {
@@ -38589,11 +38927,11 @@ function sheetCount(area2, wastage) {
 }
 function splitToStock(length) {
   const parts = [];
-  let left = roundMm(length);
+  let left = roundMm2(length);
   if (!(left > 0)) return parts;
   while (left > MAX_STOCK + 1e-9) {
     parts.push(MAX_STOCK);
-    left = roundMm(left - MAX_STOCK);
+    left = roundMm2(left - MAX_STOCK);
   }
   if (left > 1e-6) parts.push(left);
   return parts;
@@ -38658,11 +38996,64 @@ function platePieces(length, doors) {
   const pieces = [];
   let cursor = 0;
   for (const gap of merged) {
-    if (gap.a - cursor > 1e-4) pieces.push(roundMm(gap.a - cursor));
+    if (gap.a - cursor > 1e-4) pieces.push(roundMm2(gap.a - cursor));
     cursor = gap.b;
   }
-  if (length - cursor > 1e-4) pieces.push(roundMm(length - cursor));
+  if (length - cursor > 1e-4) pieces.push(roundMm2(length - cursor));
   return pieces;
+}
+function memberCuts(kind, length, count, wastage) {
+  const grouped = /* @__PURE__ */ new Map();
+  if (!(count > 0) || !(length > 0)) return [];
+  for (let i = 0; i < count; i++) {
+    for (const part of splitToStock(length)) {
+      const key = part.toFixed(3);
+      grouped.set(key, (grouped.get(key) || 0) + 1);
+    }
+  }
+  const cuts = [];
+  for (const [key, n] of grouped) {
+    const order = orderCount(n, wastage);
+    if (!(order > 0)) continue;
+    const buy = bestBuy(Number(key), order);
+    if (buy) cuts.push({ kind, ...buy });
+  }
+  cuts.sort((a, b) => b.length - a.length);
+  return cuts;
+}
+function roofSection(plan, wastage) {
+  const model = roofModel(plan?.walls, plan?.roof);
+  if (!model) return { section: null, cuts: [] };
+  return {
+    section: {
+      shape: model.shape,
+      pitch: model.pitch,
+      high: model.high,
+      planes: model.planes,
+      catchment: model.catchment,
+      litres: model.litres,
+      rainfall: model.rainfall,
+      runoff: model.runoff,
+      gutters: model.gutters,
+      gutterLength: model.gutterLength,
+      downpipes: model.downpipes,
+      rafterLength: model.rafterLength,
+      rafters: model.rafterCount,
+      raftersOrder: orderCount(model.rafterCount, wastage),
+      battenLength: model.battenLength,
+      battens: model.battenCount,
+      battensOrder: orderCount(model.battenCount, wastage),
+      sheetLength: model.sheetLength,
+      sheets: model.sheetCount,
+      sheetsOrder: orderCount(model.sheetCount, wastage),
+      ridgeLength: model.ridgeLength,
+      flashingLength: model.flashingLength
+    },
+    cuts: [
+      ...memberCuts("rafter", model.rafterLength, model.rafterCount, wastage),
+      ...memberCuts("batten", model.battenLength, model.battenCount, wastage)
+    ]
+  };
 }
 function wastageOf(plan, opts) {
   if (opts && opts.wastage != null) return normalizeWastage(opts.wastage);
@@ -38726,6 +39117,8 @@ function takeoff(plan, opts = {}) {
   plateCuts.sort((a, b) => b.length - a.length);
   cuts.push(...plateCuts);
   const floorArea = walls.length ? grossFloorArea(walls) : 0;
+  const roofed = roofSection(plan, wastage);
+  cuts.push(...roofed.cuts);
   return {
     wastage,
     studSpacing: STUD_SPACING,
@@ -38740,11 +39133,13 @@ function takeoff(plan, opts = {}) {
     claddingOrder: claddingArea * (1 + wastage),
     floorArea,
     floorSheets: sheetCount(floorArea, wastage),
-    cuts
+    cuts,
+    roof: roofed.section
   };
 }
 function cutLabel(cut) {
-  const name = cut.kind === "stud" ? "stud" : "plate";
+  const names = { stud: "stud", plate: "plate", rafter: "rafter", batten: "batten" };
+  const name = names[cut.kind] || cut.kind;
   return `${cut.count} x ${formatNum(cut.length)} m ${name} from ${cut.sticks} x ${formatNum(cut.stock)} m`;
 }
 function materialsSheetLines(plan) {
@@ -38761,7 +39156,8 @@ function materialsSheetLines(plan) {
     `Floor ${formatNum(r.floorArea)} m2`,
     `Floor sheets ${r.floorSheets}`,
     "Cut list",
-    ...r.cuts.map(cutLabel)
+    ...r.cuts.map(cutLabel),
+    ...roofOrderLines(r.roof)
   ];
   lines.push(...wrapWords(MATERIALS_NOTE, 40));
   lines.push(...wrapWords(MATERIALS_LIMIT, 40));
@@ -38770,6 +39166,7 @@ function materialsSheetLines(plan) {
 
 // js/export-sheet.js
 init_power();
+init_roof();
 var A3 = { w: 420, h: 297 };
 function round(n) {
   return Math.round(n * 1e3) / 1e3;
@@ -38779,6 +39176,11 @@ function planEntities(state) {
   const line = (layer, a, b) => entities.push({ kind: "line", layer, a: [...a], b: [...b] });
   const poly = (layer, pts) => entities.push({ kind: "poly", layer, pts: pts.map((p) => [...p]) });
   const text = (layer, at, value, h = 0.18) => entities.push({ kind: "text", layer, at: [...at], text: String(value), h });
+  const roof = roofModel(state.walls, state.roof);
+  if (roof) {
+    poly("ROOF", roof.outline);
+    if (roof.ridge) line("ROOF", roof.ridge[0], roof.ridge[1]);
+  }
   for (const d of state.decks || []) {
     const c = deckCorners(d);
     poly(d.kind === "veranda" ? "VERANDA" : "DECK", c);
@@ -38950,6 +39352,10 @@ function layoutSheet(state, opts = {}) {
     }
   }
   for (const e of entities) {
+    if (e.kind === "poly" && e.layer === "ROOF") strokeClosed(e.pts.map(map), "#6b6459", 0.35);
+    else if (e.kind === "line" && e.layer === "ROOF") stroke([map(e.a), map(e.b)], "#6b6459", 0.3);
+  }
+  for (const e of entities) {
     if (e.kind === "line" && e.layer === "WALLS") {
       stroke([map(e.a), map(e.b)], "#1c1917", Math.max(0.6, WALL_THICK * mmPerM));
     }
@@ -39043,7 +39449,9 @@ function layoutSheet(state, opts = {}) {
     lines.forEach((text, i) => label(x0 + 2, y0 + 2.6 + i * rowH, text, 2.45, "start", i === 0 ? 600 : 400));
     stackTop = y0 - 3;
   };
-  placeBox(powerSheetLines(state.power, state.equipment));
+  placeBox(powerSheetLines(state.power, state.equipment, {
+    roofFit: roofFitCount(state.walls, state.roof, state.power?.panelArea)
+  }));
   placeBox(materialsSheetLines(state));
   return { w: paperW, h: paperH, scale, items };
 }
@@ -39212,6 +39620,7 @@ function toDxf(state) {
 init_constants();
 init_geom();
 init_power();
+init_roof();
 var PlanError = class extends Error {
   constructor(message) {
     super(Array.isArray(message) ? message.join(" ") : message);
@@ -39248,6 +39657,7 @@ function migratePlan(data) {
     if (cur.version === 1) cur = migrateV1(cur);
     else if (cur.version === 2) cur = migrateV2(cur);
     else if (cur.version === 3) cur = migrateV3(cur);
+    else if (cur.version === 4) cur = migrateV4(cur);
     else throw new PlanError(`No migration from schema ${cur.version}.`);
   }
   return cur;
@@ -39278,6 +39688,14 @@ function migrateV3(data) {
     ...data,
     version: 4,
     materials
+  };
+}
+function migrateV4(data) {
+  const roof = data.roof && typeof data.roof === "object" && !Array.isArray(data.roof) ? data.roof : defaultRoof();
+  return {
+    ...data,
+    version: 5,
+    roof
   };
 }
 function validatePlan(data) {
@@ -39380,6 +39798,21 @@ function validatePlan(data) {
   } else if (data.materials && data.materials.wastage != null && !Number.isFinite(Number(data.materials.wastage))) {
     errors.push("Materials wastage is not a finite number.");
   }
+  if (data.roof != null && (typeof data.roof !== "object" || Array.isArray(data.roof))) {
+    errors.push("Roof settings must be an object.");
+  } else if (data.roof) {
+    if (data.roof.shape != null && !ROOF_SHAPES.includes(data.roof.shape)) {
+      errors.push("Roof shape must be a skillion or a gable.");
+    }
+    if (data.roof.high != null && !ROOF_HIGHS.includes(data.roof.high)) {
+      errors.push("Roof high side must be north, south, east, or west.");
+    }
+    for (const key of ["pitch", "eave", "gable", "rainfall"]) {
+      if (data.roof[key] != null && !Number.isFinite(Number(data.roof[key]))) {
+        errors.push(`Roof ${key} is not a finite number.`);
+      }
+    }
+  }
   if (data.equipment != null && !Array.isArray(data.equipment)) errors.push("Equipment must be a list.");
   (Array.isArray(data.equipment) ? data.equipment : []).forEach((e, i) => {
     if (!e || typeof e !== "object") {
@@ -39461,6 +39894,7 @@ function serializePlan(state) {
     })),
     power: clonePower(state.power),
     materials: cloneMaterials(state.materials),
+    roof: cloneRoof(state.roof),
     equipment: (state.equipment || []).map((e) => {
       const item = cleanEquipment(e);
       if (!item) return null;
@@ -39557,6 +39991,7 @@ function deserializePlan(data) {
     stumps,
     power: clonePower(data.power),
     materials: cloneMaterials(data.materials),
+    roof: cloneRoof(data.roof),
     equipment
   };
 }
@@ -39605,6 +40040,7 @@ function exportSheet(state, kind, scale) {
 init_constants();
 init_elements();
 init_power();
+init_roof();
 init_furniture();
 init_geom();
 function createPlan2D(canvas, getState, actions) {
@@ -39849,6 +40285,25 @@ function createPlan2D(canvas, getState, actions) {
     ctx.fillText(fmt(box.h), 0, 0);
     ctx.restore();
   }
+  function drawRoof(cam) {
+    const model = roofModel(getState().walls, getState().roof);
+    if (!model) return;
+    polyScreen(model.outline, cam);
+    ctx.save();
+    ctx.strokeStyle = COLORS.muted;
+    ctx.lineWidth = 1.25;
+    ctx.setLineDash([6, 4]);
+    ctx.stroke();
+    if (model.ridge) {
+      const a = toScreen(model.ridge[0], cam);
+      const b = toScreen(model.ridge[1], cam);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
   function draw() {
     const s = getState();
     if (!ctx || w < 2) return;
@@ -39857,6 +40312,7 @@ function createPlan2D(canvas, getState, actions) {
     ctx.fillRect(0, 0, w, h);
     const cam = s.camera2d;
     drawGrid(cam);
+    drawRoof(cam);
     for (const d of s.decks || []) {
       const on = s.selection?.kind === "deck" && s.selection.id === d.id;
       drawDeck(d, cam, false);
@@ -40023,7 +40479,8 @@ function createPlan2D(canvas, getState, actions) {
   }
   function fit() {
     const s = getState();
-    const b = sceneBounds(s.walls, elementPoints(s));
+    const roofPts = roofModel(s.walls, s.roof)?.outline || [];
+    const b = sceneBounds(s.walls, elementPoints(s).concat(roofPts));
     if (!b) {
       actions.setCamera2d({ x: 6, z: 5, zoom: 42 });
       return;
@@ -40243,6 +40700,7 @@ init_constants();
 init_furniture();
 init_geom();
 init_power();
+init_roof();
 var ICONS = {
   select: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 4 l14 8 -8 2 -2 8 z"/></svg>`,
   wall: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 18 V6 h4 v12 H4zm6 0 V10 h4 v8 h-4zm6 0 V8 h4 v10 h-4z"/></svg>`,
@@ -40256,6 +40714,7 @@ var ICONS = {
   gen: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 4 v3 M12 17 v3 M4 12 h3 M17 12 h3"/><circle cx="12" cy="12" r="4.5"/></svg>`,
   solar: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="7" r="2.1"/><path d="M8 2.6 v1.5 M8 9.8 v1.4 M3.4 7 H4.9 M11.1 7 h1.5 M4.6 3.6 l1 1 M11.4 3.6 l-1 1"/><path d="M3 15.2 h18 l-1.4 4 H4.4 z"/></svg>`,
   materials: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 10 h16 M4 15 h16 M10 4 v16"/></svg>`,
+  roof: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 13 L12 5 L21 13"/><path d="M6 13 V19 H18 V13"/></svg>`,
   undo: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 8 H5 v3"/><path d="M6 10 c2-4 12-4 14 3"/></svg>`,
   redo: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M16 8 h3 v3"/><path d="M18 10 c-2-4 -12-4 -14 3"/></svg>`,
   file: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M7 4 h7 l5 5 v11 H7z"/><path d="M14 4 v5 h5"/></svg>`,
@@ -40299,6 +40758,7 @@ function shellHtml() {
         <button type="button" class="tool" id="furnish-btn" title="Furnish">${ICONS.furnish}<span>Furnish</span></button>
         <button type="button" class="tool" id="solar-btn" title="Solar">${ICONS.solar}<span>Solar</span></button>
         <button type="button" class="tool" id="materials-btn" title="Materials">${ICONS.materials}<span>Materials</span></button>
+        <button type="button" class="tool" id="roof-btn" title="Roof">${ICONS.roof}<span>Roof</span></button>
         <button type="button" class="tool" id="gen-btn" title="Generate">${ICONS.gen}<span>Generate</span></button>
       </div>
       <div class="cluster view-cluster">
@@ -40376,13 +40836,15 @@ function solarInput(name, label, value, span) {
 }
 function solarResultHtml(result) {
   const nominal = result.nominalKwh == null ? "-" : `${formatNum(result.nominalKwh)} kWh nominal`;
-  const short = result.shortfall ? `<p>Available area fits ${result.panelCount} of ${result.neededCount == null ? "-" : result.neededCount} panels.</p>` : "";
+  const roof = result.roofFit == null ? "" : `<p>Roof fits ${result.roofFit} panels after a ${Math.round(SOLAR_SETBACK * 1e3)} mm edge setback.</p>`;
+  const short = result.roofCapped ? `<p>The roof caps the array at ${result.panelCount} of ${result.neededCount == null ? "-" : result.neededCount} panels.</p>` : result.shortfall ? `<p>Available area fits ${result.panelCount} of ${result.neededCount == null ? "-" : result.neededCount} panels.</p>` : "";
   const ev = result.evKwh > 0 ? ` including ${formatNum(result.evKwh)} kWh for the EV` : "";
   return `<strong>${result.panelCount} panels · ${formatNum(result.arrayKw)} kW</strong>
     <p>${formatNum(result.expectedDailyKwh)} kWh/day · ${formatNum(result.expectedYearlyKwh, 0)} kWh/year</p>
     <p>Battery ${formatNum(result.usableKwh)} kWh usable · ${nominal} · DoD ${formatNum(result.dod * 100, 0)}%</p>
     <p>Inverter ${formatNum(result.inverterKw)} kW · generator ${formatNum(result.generatorKva)} kVA</p>
     <p>Daily load ${formatNum(result.dailyKwh)} kWh${ev}</p>
+    ${roof}
     ${short}
     <p class="solar-note">${escapeHtml(POWER_NOTE)}</p>`;
 }
@@ -40430,7 +40892,7 @@ function solarFormHtml(power, resultHtml) {
       <button type="button" class="chip" data-place="charger">EV charger</button>
       <button type="button" class="chip" data-place="generator">Generator</button>
     </div>
-    <p class="solar-note">No roof yet. An array sits on the ground, on a deck, or on a flat area. Azimuth 0 faces north.</p>
+    <p class="solar-note">The roof fit caps how many panels the array can use. An array still sits on the ground, on a deck, or on a flat area. Azimuth 0 faces north.</p>
   </form>`;
 }
 function materialsResultHtml(result) {
@@ -40442,8 +40904,72 @@ function materialsResultHtml(result) {
     <p>Cladding ${formatNum(result.claddingOrder)} m²</p>
     <p>Floor ${formatNum(result.floorArea)} m² · ${result.floorSheets} sheets</p>
     ${cutBlock}
+    ${result.roof ? roofOrderParagraphs(result.roof) : ""}
     <p class="solar-note">${escapeHtml(MATERIALS_NOTE)}</p>
     <p class="solar-note">${escapeHtml(MATERIALS_LIMIT)}</p>`;
+}
+function roofOrderParagraphs(roof) {
+  const shape = roof.shape === "gable" ? "Gable" : "Skillion";
+  const pitch = formatNum(roof.pitch, roof.pitch % 1 ? 1 : 0);
+  const planes = roof.planes.map((plane) => `<p>Plane ${formatNum(plane.area)} m² ${escapeHtml(plane.face)}</p>`).join("");
+  const flash = roof.ridgeLength > 0 ? `<p>Ridge flashing ${formatNum(roof.ridgeLength)} m</p>` : `<p>Apron flashing ${formatNum(roof.flashingLength)} m</p>`;
+  const gutters = roof.gutters.map((gutter) => `<p>Gutter ${escapeHtml(gutter.face)} ${formatNum(gutter.length)} m</p>`).join("");
+  return `<p>Roof ${shape} ${pitch}°</p>
+    ${planes}
+    <p>Rafters ${roof.raftersOrder} × ${formatNum(roof.rafterLength)} m</p>
+    <p>Battens ${roof.battensOrder} × ${formatNum(roof.battenLength)} m</p>
+    <p>Sheets ${roof.sheetsOrder} × ${formatNum(roof.sheetLength)} m</p>
+    ${flash}
+    ${gutters}
+    <p>Downpipes ${roof.downpipes}</p>
+    <p>Rain ${formatNum(roof.litres, 0)} L/year</p>`;
+}
+function roofResultHtml(model, fitCount) {
+  if (!model) {
+    return `<p>Draw walls to size a roof.</p>
+      <p class="solar-note">${escapeHtml(ROOF_LIMIT)}</p>
+      <p class="solar-note">${escapeHtml(POWER_NOTE)}</p>`;
+  }
+  const shape = model.shape === "gable" ? "Gable" : "Skillion";
+  const pitch = formatNum(model.pitch, model.pitch % 1 ? 1 : 0);
+  const planes = model.planes.map((plane) => `<p>${formatNum(plane.area)} m² faces ${escapeHtml(plane.face)}</p>`).join("");
+  const gutters = model.gutters.map((gutter) => `<p>Gutter ${escapeHtml(gutter.face)} ${formatNum(gutter.length)} m</p>`).join("");
+  const fit = fitCount == null ? "" : `<p>Solar roof fit ${fitCount} panels, ${Math.round(SOLAR_SETBACK * 1e3)} mm from each edge.</p>`;
+  return `<strong>${shape} · ${pitch}°</strong>
+    ${planes}
+    <p>Flat catchment ${formatNum(model.catchment)} m²</p>
+    ${gutters}
+    <p>Downpipes ${model.downpipes}</p>
+    <p>Rain ${formatNum(model.litres, 0)} L/year at ${formatNum(model.rainfall, 0)} mm</p>
+    ${fit}
+    <p class="solar-note">${escapeHtml(ROOF_LIMIT)}</p>
+    <p class="solar-note">${escapeHtml(POWER_NOTE)}</p>`;
+}
+function roofChip(attr, value, label, on) {
+  return `<button type="button" class="chip${on ? " active" : ""}" data-${attr}="${value}">${label}</button>`;
+}
+function roofFormHtml(roof, resultHtml) {
+  const r = roof || defaultRoof();
+  const skillion = r.shape !== "gable";
+  const highs = ["north", "south", "east", "west"].map((side) => roofChip("high", side, side[0].toUpperCase() + side.slice(1), r.high === side)).join("");
+  return `<form class="pop-form" id="roof-form" autocomplete="off">
+    <p class="pop-title">Roof</p>
+    <div class="chips">
+      ${roofChip("shape", "skillion", "Skillion", skillion)}
+      ${roofChip("shape", "gable", "Gable", !skillion)}
+    </div>
+    <div class="solar-grid">
+      ${solarInput("pitch", "Pitch °", formatNum(r.pitch, r.pitch % 1 ? 1 : 0), true)}
+      ${solarInput("eaveMm", "Eave mm", String(Math.round(r.eave * 1e3)))}
+      ${solarInput("gableMm", "Gable mm", String(Math.round(r.gable * 1e3)))}
+      ${solarInput("rainfall", "Rain mm/year", formatNum(r.rainfall, 0), true)}
+    </div>
+    <div id="roof-high"${skillion ? "" : " hidden"}>
+      <p class="solar-note">High side. The plane faces the opposite way.</p>
+      <div class="chips">${highs}</div>
+    </div>
+    <div id="roof-result" class="solar-result">${resultHtml || ""}</div>
+  </form>`;
 }
 function materialsFormHtml(materials, resultHtml) {
   const pct = (materials?.wastage ?? 0.1) * 100;
@@ -40563,11 +41089,13 @@ function roomAreaText(room) {
 
 // js/app.js
 init_power();
+init_roof();
 
 // js/store.js
 init_constants();
 init_furniture();
 init_power();
+init_roof();
 function createState() {
   return {
     walls: [],
@@ -40581,6 +41109,7 @@ function createState() {
     equipment: [],
     power: defaultPower(),
     materials: defaultMaterials(),
+    roof: defaultRoof(),
     title: "",
     dimMode: "centreline",
     tool: "wall",
@@ -40616,6 +41145,7 @@ function snapshot(state) {
     equipment: (state.equipment || []).map((e) => ({ ...e })),
     power: clonePower(state.power),
     materials: cloneMaterials(state.materials),
+    roof: cloneRoof(state.roof),
     title: state.title || ""
   };
 }
@@ -40631,6 +41161,7 @@ function applySnapshot(state, s) {
   state.equipment = (s.equipment || []).map((e) => ({ ...e }));
   state.power = clonePower(s.power);
   state.materials = cloneMaterials(s.materials);
+  state.roof = cloneRoof(s.roof);
   state.title = s.title || "";
 }
 function checkpoint(state) {
@@ -40804,6 +41335,7 @@ function mount(root) {
     state.equipment = (norm.equipment || []).map((e) => ({ ...e }));
     state.power = clonePower(norm.power);
     state.materials = cloneMaterials(plan.materials);
+    state.roof = cloneRoof(plan.roof);
     state.title = plan.title || "";
     if (plan.dimMode) state.dimMode = plan.dimMode;
     state.chain = null;
@@ -41187,7 +41719,7 @@ function mount(root) {
     else if (state.tool === "stumps") extra = " · click to place a stump";
     else if (state.tool === "array") extra = " · drag the array rectangle";
     else if (EQUIP[state.tool]) extra = ` · click to place the ${EQUIP[state.tool].label.toLowerCase()}`;
-    const solar = powerStatusLine(state.power, state.equipment);
+    const solar = powerStatusLine(state.power, state.equipment, powerOpts());
     if (solar) extra += ` · ${solar}`;
     if (state.note) extra += ` · ${state.note}`;
     const summary = `${state.rooms.length} rooms · net ${fmtArea(net)} · GFA ${fmtArea(gfa)}${extra}`;
@@ -41252,6 +41784,7 @@ function mount(root) {
       ["array", "battery", "inverter", "charger", "generator"].includes(state.tool) || !pop.hidden && !!pop.querySelector("#solar-form")
     );
     $("#materials-btn")?.classList.toggle("active", !pop.hidden && !!pop.querySelector("#materials-form"));
+    $("#roof-btn")?.classList.toggle("active", !pop.hidden && !!pop.querySelector("#roof-form"));
     root.querySelectorAll("[data-furn]").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.furn === state.furnish);
     });
@@ -41306,7 +41839,7 @@ function mount(root) {
   function hidePop() {
     pop.hidden = true;
     pop.innerHTML = "";
-    pop.classList.remove("solar-open", "materials-open");
+    pop.classList.remove("solar-open", "materials-open", "roof-open");
     syncTools();
   }
   function showPop(anchor, html, width = 320) {
@@ -41513,6 +42046,9 @@ function mount(root) {
       evHours: clamp(readNum(form, "evHours", prev.evHours), 0, 24)
     });
   }
+  function powerOpts() {
+    return { roofFit: roofFitCount(state.walls, state.roof, state.power?.panelArea) };
+  }
   function solarPopover(anchor) {
     if (!state.power?.configured) {
       checkpoint(state);
@@ -41521,9 +42057,9 @@ function mount(root) {
     }
     const refreshResult = () => {
       const el = pop.querySelector("#solar-result");
-      if (el) el.innerHTML = solarResultHtml(sizePower(state.power));
+      if (el) el.innerHTML = solarResultHtml(sizePower(state.power, powerOpts()));
     };
-    showPop(anchor, solarFormHtml(state.power, solarResultHtml(sizePower(state.power))), 420);
+    showPop(anchor, solarFormHtml(state.power, solarResultHtml(sizePower(state.power, powerOpts()))), 420);
     pop.classList.add("solar-open");
     const form = pop.querySelector("#solar-form");
     const apply = () => {
@@ -41602,6 +42138,57 @@ function mount(root) {
     form.addEventListener("submit", (e) => e.preventDefault());
     form.addEventListener("input", apply);
     form.addEventListener("change", apply);
+    syncTools();
+  }
+  function readRoof(form, prev) {
+    const shape = form.querySelector("[data-shape].active")?.dataset.shape === "gable" ? "gable" : "skillion";
+    const high = form.querySelector("[data-high].active")?.dataset.high || prev.high;
+    return cloneRoof({
+      shape,
+      high,
+      pitch: readNum(form, "pitch", prev.pitch),
+      eave: readNum(form, "eaveMm", prev.eave * 1e3) / 1e3,
+      gable: readNum(form, "gableMm", prev.gable * 1e3) / 1e3,
+      rainfall: readNum(form, "rainfall", prev.rainfall)
+    });
+  }
+  function roofPopover(anchor) {
+    const view = () => roofResultHtml(roofModel(state.walls, state.roof), roofFitCount(state.walls, state.roof, state.power?.panelArea));
+    const refreshResult = () => {
+      const el = pop.querySelector("#roof-result");
+      if (el) el.innerHTML = view();
+    };
+    showPop(anchor, roofFormHtml(state.roof, view()), 420);
+    pop.classList.add("roof-open");
+    const form = pop.querySelector("#roof-form");
+    let drafted = false;
+    const apply = () => {
+      const next = readRoof(form, state.roof);
+      const highRow = form.querySelector("#roof-high");
+      if (highRow) highRow.hidden = next.shape !== "skillion";
+      if (JSON.stringify(next) === JSON.stringify(cloneRoof(state.roof))) {
+        refreshResult();
+        return;
+      }
+      if (!drafted) {
+        checkpoint(state);
+        drafted = true;
+      }
+      state.roof = next;
+      refreshResult();
+      render();
+      persist.persist();
+    };
+    form.addEventListener("submit", (e) => e.preventDefault());
+    form.addEventListener("input", apply);
+    form.addEventListener("change", apply);
+    form.querySelectorAll("[data-shape], [data-high]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const key = btn.dataset.shape ? "shape" : "high";
+        form.querySelectorAll(`[data-${key}]`).forEach((other) => other.classList.toggle("active", other === btn));
+        apply();
+      });
+    });
     syncTools();
   }
   function readWastage(form, prev) {
@@ -41829,7 +42416,7 @@ function mount(root) {
         bits.push(inspField("tilt", "Tilt °", fieldValue(obj, "tilt")));
         bits.push(inspField("azimuth", "Azimuth °", fieldValue(obj, "azimuth"), true));
       }
-      bits.push(`<p class="insp-read">${escapeHtml(powerInspectorText(state.power))}</p>`);
+      bits.push(`<p class="insp-read">${escapeHtml(powerInspectorText(state.power, powerOpts()))}</p>`);
       return bits.join("");
     }
     if (obj.type === "tank") return `${nameField(fieldValue(obj, "name"))}<p class="insp-read">1.80 × 0.60 m · snaps to a wall</p>`;
@@ -42050,6 +42637,7 @@ function mount(root) {
     if (e.target.closest("#gen-btn")) genPopover(e.target.closest("#gen-btn"));
     if (e.target.closest("#solar-btn")) solarPopover(e.target.closest("#solar-btn"));
     if (e.target.closest("#materials-btn")) materialsPopover(e.target.closest("#materials-btn"));
+    if (e.target.closest("#roof-btn")) roofPopover(e.target.closest("#roof-btn"));
     if (e.target.closest("#furnish-btn")) setTool(state.tool === "furnish" ? "select" : "furnish");
     const furn = e.target.closest("[data-furn]");
     if (furn) {
@@ -42201,7 +42789,7 @@ function mount(root) {
     if (map[e.key.toLowerCase()] && !e.metaKey && !e.ctrlKey) setTool(map[e.key.toLowerCase()]);
   }
   document.addEventListener("pointerdown", (e) => {
-    if (!pop.hidden && !pop.contains(e.target) && !e.target.closest("#gen-btn, #solar-btn, #materials-btn, #file-btn, [data-tool=room]")) hidePop();
+    if (!pop.hidden && !pop.contains(e.target) && !e.target.closest("#gen-btn, #solar-btn, #materials-btn, #roof-btn, #file-btn, [data-tool=room]")) hidePop();
     const menu = $("#ctx-menu");
     if (menu && !menu.hidden && !menu.contains(e.target) && !e.target.closest("#insp-more")) hideMenu();
   });
